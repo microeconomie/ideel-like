@@ -105,6 +105,7 @@
           <p class="dropzone-text">Glisse une image ou clique pour parcourir</p>
         </div>
         <input type="file" id="add-logo-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
+        <button type="button" id="add-logo-remove-btn" class="link-btn hidden">Retirer le logo</button>
 
         <label for="add-price">Prix mensuel</label>
         <input type="text" id="add-price" name="price" inputmode="decimal" placeholder="ex. 9,99" required>
@@ -145,6 +146,15 @@
         <p id="add-form-error" class="auth-error hidden" role="alert"></p>
 
         <button type="submit" id="add-submit-btn" class="btn btn-primary">Ajouter</button>
+
+        <div id="delete-zone" class="delete-zone hidden">
+          <button type="button" id="delete-sub-btn" class="btn btn-danger">Supprimer l'abonnement</button>
+          <div id="delete-confirm" class="delete-confirm hidden">
+            <p>Supprimer définitivement cet abonnement ?</p>
+            <button type="button" id="delete-confirm-btn" class="btn btn-danger btn-sm">Confirmer la suppression</button>
+            <button type="button" id="delete-cancel-btn" class="btn btn-ghost btn-sm">Annuler</button>
+          </div>
+        </div>
       </form>
     </div>
   </div>

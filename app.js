@@ -12,6 +12,8 @@ const state = {
 let selectedCardId = null;
 let addLogoBlob = null;
 let addLogoType = null;
+let removeLogoFlag = false;
+let editingSubscription = null;
 let newCardIconBlob = null;
 let newCardIconType = null;
 let lastFocusedElement = null;
@@ -37,15 +39,23 @@ const el = {
   addFab: document.getElementById('add-fab'),
   addModalOverlay: document.getElementById('add-modal-overlay'),
   addModal: document.querySelector('#add-modal-overlay .modal'),
+  addModalTitle: document.getElementById('add-modal-title'),
   addModalClose: document.getElementById('add-modal-close'),
   addForm: document.getElementById('add-form'),
   addName: document.getElementById('add-name'),
   addLogoDropzone: document.getElementById('add-logo-dropzone'),
   addLogoInput: document.getElementById('add-logo-input'),
   addLogoPreview: document.getElementById('add-logo-preview'),
+  addLogoRemoveBtn: document.getElementById('add-logo-remove-btn'),
   addPrice: document.getElementById('add-price'),
   addFormError: document.getElementById('add-form-error'),
   addSubmitBtn: document.getElementById('add-submit-btn'),
+
+  deleteZone: document.getElementById('delete-zone'),
+  deleteSubBtn: document.getElementById('delete-sub-btn'),
+  deleteConfirm: document.getElementById('delete-confirm'),
+  deleteConfirmBtn: document.getElementById('delete-confirm-btn'),
+  deleteCancelBtn: document.getElementById('delete-cancel-btn'),
 
   addCardChip: document.getElementById('add-card-chip'),
   addCardChipIcon: document.getElementById('add-card-chip-icon'),
@@ -328,6 +338,10 @@ function createSubscriptionCard(sub) {
   viewLink.href = '#';
   viewLink.className = 'sub-view';
   viewLink.textContent = 'Voir >';
+  viewLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    openEditModal(sub);
+  });
   footer.appendChild(viewLink);
 
   body.appendChild(footer);
@@ -452,6 +466,18 @@ function setupDropzone(zoneEl, inputEl, previewEl, maxDim, onProcessed) {
 setupDropzone(el.addLogoDropzone, el.addLogoInput, el.addLogoPreview, 400, (blob, type) => {
   addLogoBlob = blob;
   addLogoType = type;
+  removeLogoFlag = false;
+  el.addLogoRemoveBtn.classList.remove('hidden');
+});
+
+el.addLogoRemoveBtn.addEventListener('click', () => {
+  addLogoBlob = null;
+  addLogoType = null;
+  removeLogoFlag = true;
+  el.addLogoPreview.classList.add('hidden');
+  el.addLogoPreview.src = '';
+  el.addLogoInput.value = '';
+  el.addLogoRemoveBtn.classList.add('hidden');
 });
 
 setupDropzone(el.newCardDropzone, el.newCardIconInput, el.newCardIconPreview, 64, (blob, type) => {
@@ -639,20 +665,53 @@ function resetAddForm() {
   el.addForm.reset();
   addLogoBlob = null;
   addLogoType = null;
+  removeLogoFlag = false;
   el.addLogoPreview.classList.add('hidden');
   el.addLogoPreview.src = '';
+  el.addLogoRemoveBtn.classList.add('hidden');
   clearSelectedCard();
   closeNewCardForm();
   hideAddFormError();
+  el.deleteConfirm.classList.add('hidden');
+  el.deleteSubBtn.classList.remove('hidden');
 }
 
 function openAddModal() {
+  editingSubscription = null;
   resetAddForm();
+  el.addModalTitle.textContent = 'Ajouter un abonnement';
+  el.addSubmitBtn.textContent = 'Ajouter';
+  el.deleteZone.classList.add('hidden');
+  openModal(el.addModalOverlay, el.addModal);
+}
+
+function openEditModal(sub) {
+  editingSubscription = sub;
+  resetAddForm();
+  el.addModalTitle.textContent = 'Modifier l’abonnement';
+  el.addSubmitBtn.textContent = 'Enregistrer';
+  el.deleteZone.classList.remove('hidden');
+
+  el.addName.value = sub.name;
+  el.addPrice.value = Number(sub.monthly_price).toFixed(2);
+
+  if (sub.logo_path) {
+    el.addLogoPreview.src = getPublicUrl(sub.logo_path);
+    el.addLogoPreview.classList.remove('hidden');
+    el.addLogoRemoveBtn.classList.remove('hidden');
+  }
+
+  const linkedCard = state.cards.find((c) => c.id === sub.payment_card_id);
+  if (linkedCard) {
+    selectCard(linkedCard);
+  }
+
   openModal(el.addModalOverlay, el.addModal);
 }
 
 function closeAddModal() {
   closeModalGeneric(el.addModalOverlay);
+  editingSubscription = null;
 }
 
 el.addForm.addEventListener('submit', async (event) => {
@@ -670,35 +729,89 @@ el.addForm.addEventListener('submit', async (event) => {
 
   el.addSubmitBtn.disabled = true;
   try {
-    let logoPath = null;
+    const previousLogoPath = editingSubscription ? editingSubscription.logo_path : null;
+    let logoPath = previousLogoPath;
+
     if (addLogoBlob) {
       logoPath = `${state.session.user.id}/logos/${crypto.randomUUID()}.${extForType(addLogoType)}`;
       const { error: uploadError } = await sb.storage
         .from('images')
         .upload(logoPath, addLogoBlob, { contentType: addLogoType });
       if (uploadError) throw uploadError;
+    } else if (removeLogoFlag) {
+      logoPath = null;
     }
 
-    const { data, error } = await sb
-      .from('subscriptions')
-      .insert({
-        id: crypto.randomUUID(),
-        name,
-        monthly_price: priceValue,
-        logo_path: logoPath,
-        payment_card_id: selectedCardId,
-      })
-      .select()
-      .single();
-    if (error) throw error;
+    const payload = {
+      name,
+      monthly_price: priceValue,
+      logo_path: logoPath,
+      payment_card_id: selectedCardId,
+    };
 
-    state.subscriptions.push(data);
+    let saved;
+    if (editingSubscription) {
+      const { data, error } = await sb
+        .from('subscriptions')
+        .update(payload)
+        .eq('id', editingSubscription.id)
+        .select()
+        .single();
+      if (error) throw error;
+      saved = data;
+      if (previousLogoPath && previousLogoPath !== logoPath) {
+        await sb.storage.from('images').remove([previousLogoPath]).catch(() => {});
+      }
+      const idx = state.subscriptions.findIndex((s) => s.id === saved.id);
+      state.subscriptions[idx] = saved;
+    } else {
+      const { data, error } = await sb
+        .from('subscriptions')
+        .insert({ id: crypto.randomUUID(), ...payload })
+        .select()
+        .single();
+      if (error) throw error;
+      saved = data;
+      state.subscriptions.push(saved);
+    }
+
     renderAll();
     closeAddModal();
   } catch (error) {
     showAddFormError(friendlyErrorMessage(error));
   } finally {
     el.addSubmitBtn.disabled = false;
+  }
+});
+
+el.deleteSubBtn.addEventListener('click', () => {
+  el.deleteSubBtn.classList.add('hidden');
+  el.deleteConfirm.classList.remove('hidden');
+});
+
+el.deleteCancelBtn.addEventListener('click', () => {
+  el.deleteConfirm.classList.add('hidden');
+  el.deleteSubBtn.classList.remove('hidden');
+});
+
+el.deleteConfirmBtn.addEventListener('click', async () => {
+  if (!editingSubscription) return;
+  el.deleteConfirmBtn.disabled = true;
+  try {
+    const { error } = await sb.from('subscriptions').delete().eq('id', editingSubscription.id);
+    if (error) throw error;
+    if (editingSubscription.logo_path) {
+      await sb.storage.from('images').remove([editingSubscription.logo_path]).catch(() => {});
+    }
+    state.subscriptions = state.subscriptions.filter((s) => s.id !== editingSubscription.id);
+    renderAll();
+    closeAddModal();
+  } catch (error) {
+    showAddFormError(friendlyErrorMessage(error));
+    el.deleteConfirm.classList.add('hidden');
+    el.deleteSubBtn.classList.remove('hidden');
+  } finally {
+    el.deleteConfirmBtn.disabled = false;
   }
 });
 

@@ -586,6 +586,51 @@ body {
   margin-top: 0;
 }
 
+.btn-danger {
+  background: var(--color-danger);
+  color: var(--color-white);
+  margin-top: 0;
+}
+
+.btn-danger:hover {
+  filter: brightness(0.95);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  margin-top: -4px;
+  align-self: flex-start;
+}
+
+.link-btn:hover {
+  color: var(--color-danger);
+}
+
+.delete-zone {
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+  margin-top: 8px;
+}
+
+.delete-confirm p {
+  font-size: 13px;
+  color: var(--color-text);
+  margin: 0 0 8px;
+}
+
+.delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     flex-direction: column;
