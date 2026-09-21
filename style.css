@@ -164,12 +164,15 @@ body {
 
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {
   width: 220px;
   flex-shrink: 0;
+  height: 100vh;
+  overflow: hidden;
   background: var(--color-white);
   border-right: 1px solid var(--color-border);
   display: flex;
@@ -180,6 +183,8 @@ body {
 .sidebar-nav {
   margin-top: 32px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .sidebar-nav ul {
@@ -207,6 +212,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .user-email {
@@ -218,6 +224,10 @@ body {
 
 .main-content {
   flex: 1;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   padding: 32px 40px;
 }
 
@@ -226,6 +236,13 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 24px;
+  flex-shrink: 0;
+}
+
+.main-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .page-header h1 {
@@ -819,11 +836,17 @@ body {
 @media (max-width: 900px) {
   .app-shell {
     flex-direction: column;
+    height: auto;
+    overflow: visible;
   }
 
   .sidebar {
     width: 100%;
+    height: auto;
+    overflow: visible;
     flex-direction: row;
+    flex-wrap: wrap;
+    row-gap: 12px;
     align-items: center;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
@@ -833,6 +856,7 @@ body {
   .sidebar-nav {
     margin-top: 0;
     flex: 1;
+    overflow: visible;
   }
 
   .sidebar-nav ul {
@@ -840,11 +864,18 @@ body {
   }
 
   .sidebar-footer {
-    flex-direction: row;
-    align-items: center;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .main-content {
+    height: auto;
+    overflow: visible;
     padding: 24px 20px;
+  }
+
+  .main-scroll {
+    overflow: visible;
   }
 }

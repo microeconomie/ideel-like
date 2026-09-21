@@ -74,16 +74,18 @@
       </div>
     </header>
 
-    <p id="global-error" class="global-error hidden" role="alert"></p>
+    <div class="main-scroll">
+      <p id="global-error" class="global-error hidden" role="alert"></p>
 
-    <p id="subscriptions-loading" class="placeholder-note">Chargement des abonnements…</p>
+      <p id="subscriptions-loading" class="placeholder-note">Chargement des abonnements…</p>
 
-    <div id="subscriptions-empty" class="empty-state hidden">
-      <p><strong>Aucun abonnement pour l'instant.</strong></p>
-      <p>Clique sur le bouton vert en bas à droite pour ajouter ton premier abonnement.</p>
+      <div id="subscriptions-empty" class="empty-state hidden">
+        <p><strong>Aucun abonnement pour l'instant.</strong></p>
+        <p>Clique sur le bouton vert en bas à droite pour ajouter ton premier abonnement.</p>
+      </div>
+
+      <div id="subscriptions-grid" class="subscriptions-grid"></div>
     </div>
-
-    <div id="subscriptions-grid" class="subscriptions-grid"></div>
   </main>
 
   <button type="button" id="add-fab" class="fab" aria-label="Ajouter un abonnement">+</button>
