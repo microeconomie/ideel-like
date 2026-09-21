@@ -580,14 +580,13 @@ function showToast(message) {
 }
 
 async function persistOrder(previousOrder) {
-  // Upsert requires a full row (Postgres validates NOT NULL columns for the INSERT side of
-  // INSERT ... ON CONFLICT before it ever resolves to the UPDATE branch), so a partial
-  // {id, position} payload fails -- resend each subscription's current data with only
-  // position changed.
+  // A dedicated RPC touches only the position column, unlike resending full rows via
+  // upsert, which would silently overwrite a name/price/logo change made concurrently
+  // in another tab or device with stale local data.
   state.subscriptions = state.subscriptions.map((sub, idx) => ({ ...sub, position: idx }));
-  const updates = state.subscriptions;
+  const orderedIds = state.subscriptions.map((sub) => sub.id);
   try {
-    const { error } = await sb.from('subscriptions').upsert(updates, { onConflict: 'id' });
+    const { error } = await sb.rpc('reorder_subscriptions', { ordered_ids: orderedIds });
     if (error) throw error;
     renderSubscriptions();
   } catch (error) {
