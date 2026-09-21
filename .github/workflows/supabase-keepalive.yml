@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   ping:
@@ -31,11 +32,13 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
       # GitHub auto-disables a public repo's scheduled workflows after 60 days without any
-      # repository activity. A disabled workflow can no longer run at all (not even
-      # workflow_dispatch), so it cannot re-enable itself after the fact -- the only reliable
-      # fix is to prevent that inactivity window from ever being reached. A push to any branch
-      # counts as activity, so once a month this pushes a trivial timestamp commit to a
-      # dedicated "keepalive" branch, never touching main.
+      # repository activity, and a disabled workflow can no longer run at all afterward (not
+      # even workflow_dispatch) -- it must be re-enabled from outside. So both fixes below only
+      # work as *prevention*, run once a month while the workflow is still active:
+      #  1) call the "enable workflow" API on this very workflow, which resets GitHub's
+      #     60-day inactivity timer (the method dedicated keep-alive tools use);
+      #  2) push a trivial timestamp commit to a dedicated "keepalive" branch (never main),
+      #     in case a push to a non-default branch also counts as repository activity.
       - name: Checkout for monthly activity commit
         if: github.event.schedule == '0 8 1 * *' || github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
@@ -65,3 +68,18 @@ jobs:
             git commit -m "Keep repository active to prevent GitHub from disabling scheduled workflows"
             git push origin keepalive
           fi
+
+      - name: Reset the 60-day inactivity timer via the enable-workflow API
+        if: github.event.schedule == '0 8 1 * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/supabase-keepalive.yml/enable")
+          echo "Enable-workflow API status: $status"
+          if [ "$status" != "204" ]; then
+            echo "Failed to reset the inactivity timer"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
