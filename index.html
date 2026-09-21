@@ -92,6 +92,9 @@
     </div>
   </main>
 
+  <div id="dnd-announcer" class="visually-hidden" role="status" aria-live="assertive"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
   <button type="button" id="add-fab" class="fab" aria-label="Ajouter un abonnement">+</button>
 
   <div id="add-modal-overlay" class="modal-overlay hidden">
@@ -183,6 +186,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
 <script src="app.js?v=988cb9b"></script>
 </body>
 </html>

@@ -34,6 +34,12 @@ const PENCIL_SVG =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.5 1.5a1.5 1.5 0 0 1 2.12 0l.88.88a1.5 1.5 0 0 1 0 2.12l-8 8-3.5 1 1-3.5 8-8Z"/></svg>';
 const TRASH_SVG =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2h4a1 1 0 0 1 1 1v1h3v1.5H2V4h3V3a1 1 0 0 1 1-1Zm-2 4h8l-.6 8.2a1 1 0 0 1-1 .8H5.6a1 1 0 0 1-1-.8L4 6Z"/></svg>';
+const GRIP_SVG =
+  '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor" aria-hidden="true">' +
+  '<circle cx="2" cy="2" r="1.4"/><circle cx="8" cy="2" r="1.4"/>' +
+  '<circle cx="2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/>' +
+  '<circle cx="2" cy="14" r="1.4"/><circle cx="8" cy="14" r="1.4"/>' +
+  '</svg>';
 
 const el = {
   loading: document.getElementById('app-loading'),
@@ -53,6 +59,8 @@ const el = {
   subscriptionsCount: document.getElementById('subscriptions-count'),
   subscriptionsTotal: document.getElementById('subscriptions-total'),
   periodOptions: document.querySelectorAll('.period-option'),
+  dndAnnouncer: document.getElementById('dnd-announcer'),
+  toast: document.getElementById('toast'),
 
   addFab: document.getElementById('add-fab'),
   addModalOverlay: document.getElementById('add-modal-overlay'),
@@ -245,7 +253,7 @@ async function loadData() {
   try {
     const [methodsRes, subsRes] = await Promise.all([
       sb.from('payment_methods').select('*').order('created_at', { ascending: true }),
-      sb.from('subscriptions').select('*').order('created_at', { ascending: true }),
+      sb.from('subscriptions').select('*').order('position', { ascending: true }),
     ]);
     if (methodsRes.error) throw methodsRes.error;
     if (subsRes.error) throw subsRes.error;
@@ -497,6 +505,16 @@ function createSubscriptionCard(sub) {
       initialsEl.classList.add('sub-logo-initials--dark');
     }
   }
+
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'drag-handle';
+  handle.dataset.id = sub.id;
+  handle.setAttribute('aria-label', `Déplacer l'abonnement ${sub.name}`);
+  handle.innerHTML = GRIP_SVG;
+  handle.addEventListener('keydown', (event) => onHandleKeydown(event, sub.id));
+  logoBox.appendChild(handle);
+
   card.appendChild(logoBox);
 
   const body = h('div', 'sub-body');
@@ -538,6 +556,137 @@ function renderSubscriptions() {
   el.subscriptionsEmpty.classList.add('hidden');
   state.subscriptions.forEach((sub) => {
     el.subscriptionsGrid.appendChild(createSubscriptionCard(sub));
+  });
+}
+
+// Drag & drop reordering --------------------------------------------------
+
+let kbDrag = null;
+let sortablePreviousOrder = null;
+let toastTimer = null;
+
+function announce(message) {
+  el.dndAnnouncer.textContent = '';
+  requestAnimationFrame(() => {
+    el.dndAnnouncer.textContent = message;
+  });
+}
+
+function showToast(message) {
+  el.toast.textContent = message;
+  el.toast.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.toast.classList.add('hidden'), 4000);
+}
+
+async function persistOrder(previousOrder) {
+  // Upsert requires a full row (Postgres validates NOT NULL columns for the INSERT side of
+  // INSERT ... ON CONFLICT before it ever resolves to the UPDATE branch), so a partial
+  // {id, position} payload fails -- resend each subscription's current data with only
+  // position changed.
+  state.subscriptions = state.subscriptions.map((sub, idx) => ({ ...sub, position: idx }));
+  const updates = state.subscriptions;
+  try {
+    const { error } = await sb.from('subscriptions').upsert(updates, { onConflict: 'id' });
+    if (error) throw error;
+    renderSubscriptions();
+  } catch (error) {
+    state.subscriptions = previousOrder;
+    renderSubscriptions();
+    showToast("Impossible d'enregistrer le nouvel ordre, abonnements restaurés.");
+  }
+}
+
+function focusHandleFor(id) {
+  const handle = el.subscriptionsGrid.querySelector(`.drag-handle[data-id="${id}"]`);
+  if (handle) handle.focus();
+}
+
+function moveKb(delta, subId) {
+  const newIndex = kbDrag.currentIndex + delta;
+  if (newIndex < 0 || newIndex >= state.subscriptions.length) return;
+  const arr = state.subscriptions;
+  const [item] = arr.splice(kbDrag.currentIndex, 1);
+  arr.splice(newIndex, 0, item);
+  kbDrag.currentIndex = newIndex;
+  renderSubscriptions();
+  requestAnimationFrame(() => {
+    const handle = el.subscriptionsGrid.querySelector(`.drag-handle[data-id="${subId}"]`);
+    if (handle) {
+      handle.classList.add('is-grabbed');
+      handle.focus();
+    }
+  });
+  announce(`Position ${newIndex + 1} sur ${arr.length}.`);
+}
+
+function onHandleKeydown(event, subId) {
+  const isActivate = event.key === ' ' || event.key === 'Spacebar' || event.key === 'Enter';
+
+  if (!kbDrag) {
+    if (!isActivate) return;
+    event.preventDefault();
+    const idx = state.subscriptions.findIndex((s) => s.id === subId);
+    if (idx === -1) return;
+    kbDrag = { id: subId, originalIndex: idx, currentIndex: idx, previousOrder: [...state.subscriptions] };
+    event.currentTarget.classList.add('is-grabbed');
+    announce(
+      `${state.subscriptions[idx].name} saisi. Position ${idx + 1} sur ${state.subscriptions.length}. ` +
+        "Flèches pour déplacer, Espace pour déposer, Échap pour annuler."
+    );
+    return;
+  }
+
+  if (kbDrag.id !== subId) return;
+
+  if (isActivate) {
+    event.preventDefault();
+    const sub = state.subscriptions[kbDrag.currentIndex];
+    const previousOrder = kbDrag.previousOrder;
+    kbDrag = null;
+    announce(
+      `${sub.name} déposé en position ${state.subscriptions.findIndex((s) => s.id === sub.id) + 1} sur ${state.subscriptions.length}.`
+    );
+    persistOrder(previousOrder).then(() => focusHandleFor(subId));
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    const arr = state.subscriptions;
+    const [item] = arr.splice(kbDrag.currentIndex, 1);
+    arr.splice(kbDrag.originalIndex, 0, item);
+    kbDrag = null;
+    renderSubscriptions();
+    announce('Déplacement annulé.');
+    requestAnimationFrame(() => focusHandleFor(subId));
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveKb(-1, subId);
+  } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveKb(1, subId);
+  }
+}
+
+if (window.Sortable) {
+  Sortable.create(el.subscriptionsGrid, {
+    handle: '.drag-handle',
+    animation: 150,
+    forceFallback: true,
+    fallbackTolerance: 3,
+    ghostClass: 'sub-card--ghost',
+    chosenClass: 'sub-card--dragging',
+    scroll: true,
+    scrollSensitivity: 80,
+    scrollSpeed: 15,
+    onStart: () => {
+      sortablePreviousOrder = [...state.subscriptions];
+    },
+    onEnd: () => {
+      const ids = Array.from(el.subscriptionsGrid.children).map((c) => c.dataset.id);
+      state.subscriptions = ids.map((id) => state.subscriptions.find((s) => s.id === id)).filter(Boolean);
+      const previousOrder = sortablePreviousOrder;
+      sortablePreviousOrder = null;
+      persistOrder(previousOrder);
+    },
   });
 }
 
@@ -1309,9 +1458,12 @@ el.addForm.addEventListener('submit', async (event) => {
       const idx = state.subscriptions.findIndex((s) => s.id === saved.id);
       state.subscriptions[idx] = saved;
     } else {
+      const nextPosition = state.subscriptions.length
+        ? state.subscriptions[state.subscriptions.length - 1].position + 1
+        : 0;
       const { data, error } = await sb
         .from('subscriptions')
-        .insert({ id: crypto.randomUUID(), ...payload })
+        .insert({ id: crypto.randomUUID(), position: nextPosition, ...payload })
         .select()
         .single();
       if (error) throw error;
