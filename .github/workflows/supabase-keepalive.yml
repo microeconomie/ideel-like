@@ -2,8 +2,12 @@ name: Supabase keep-alive
 
 on:
   schedule:
-    - cron: '0 7 * * 2,5'
+    - cron: '0 7 * * 2,5' # Tuesday and Friday morning: ping the database
+    - cron: '0 8 1 * *' # 1st of the month: keep the repo "active" so GitHub doesn't auto-disable scheduled workflows
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   ping:
@@ -25,3 +29,39 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      # GitHub auto-disables a public repo's scheduled workflows after 60 days without any
+      # repository activity. A disabled workflow can no longer run at all (not even
+      # workflow_dispatch), so it cannot re-enable itself after the fact -- the only reliable
+      # fix is to prevent that inactivity window from ever being reached. A push to any branch
+      # counts as activity, so once a month this pushes a trivial timestamp commit to a
+      # dedicated "keepalive" branch, never touching main.
+      - name: Checkout for monthly activity commit
+        if: github.event.schedule == '0 8 1 * *' || github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Keep repository active (monthly commit on the keepalive branch)
+        if: github.event.schedule == '0 8 1 * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin keepalive > /dev/null 2>&1; then
+            git checkout -b keepalive origin/keepalive
+          else
+            git checkout --orphan keepalive
+            git rm -rf . > /dev/null 2>&1 || true
+          fi
+
+          mkdir -p .github/keepalive
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/keepalive/last-ping.txt
+          git add .github/keepalive/last-ping.txt
+
+          if git diff --cached --quiet; then
+            echo "No change, skipping commit"
+          else
+            git commit -m "Keep repository active to prevent GitHub from disabling scheduled workflows"
+            git push origin keepalive
+          fi
