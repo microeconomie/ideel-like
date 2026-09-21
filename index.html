@@ -107,39 +107,48 @@
         <input type="file" id="add-logo-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
         <button type="button" id="add-logo-remove-btn" class="link-btn hidden">Retirer le logo</button>
 
+        <div id="add-logo-color-row" class="logo-color-row hidden">
+          <label for="add-logo-color-input" class="logo-color-label">Couleur du fond</label>
+          <input type="color" id="add-logo-color-input" value="#F5F6F8">
+          <button type="button" id="add-logo-color-auto" class="link-btn hidden">Couleur automatique</button>
+        </div>
+
         <label for="add-price">Prix mensuel</label>
         <input type="text" id="add-price" name="price" inputmode="decimal" placeholder="ex. 9,99" required>
 
-        <label for="add-card-input">CB liée</label>
+        <label for="pm-input">Moyen de paiement</label>
         <div class="tag-field">
-          <div id="add-card-chip" class="card-chip hidden">
-            <span id="add-card-chip-icon" class="card-pill-icon"></span>
-            <span id="add-card-chip-label"></span>
-            <button type="button" id="add-card-chip-remove" aria-label="Retirer la CB liée">&times;</button>
+          <div id="pm-chip" class="card-chip hidden">
+            <span id="pm-chip-icon" class="card-pill-icon"></span>
+            <span id="pm-chip-label"></span>
+            <button type="button" id="pm-chip-remove" aria-label="Retirer le moyen de paiement lié">&times;</button>
           </div>
-          <div id="add-card-input-wrap">
-            <input type="text" id="add-card-input" autocomplete="off" placeholder="Rechercher ou créer une CB">
-            <ul id="add-card-suggestions" class="suggestions hidden" role="listbox"></ul>
+          <div id="pm-input-wrap">
+            <input type="text" id="pm-input" autocomplete="off" placeholder="Rechercher ou créer un moyen de paiement">
+            <ul id="pm-suggestions" class="suggestions hidden" role="listbox"></ul>
           </div>
+          <p id="pm-inline-error" class="auth-error hidden" role="alert"></p>
         </div>
 
-        <div id="new-card-form" class="new-card-form hidden">
-          <label for="new-card-label">Libellé de la carte</label>
-          <input type="text" id="new-card-label" maxlength="40">
-          <p class="field-hint">Un libellé seulement (ex. Visa perso), jamais le numéro de carte</p>
+        <div id="pm-form" class="new-card-form hidden">
+          <h3 id="pm-form-title" class="pm-form-title">Modifier le moyen de paiement</h3>
+          <label for="pm-form-label">Libellé</label>
+          <input type="text" id="pm-form-label" maxlength="40">
+          <p class="field-hint">Un libellé seulement (ex. Visa Revolut, Prélèvement bancaire), jamais un numéro de carte ou d'IBAN</p>
 
-          <label id="new-card-icon-label">Icône de la banque (optionnelle)</label>
-          <div id="new-card-dropzone" class="dropzone dropzone-small" tabindex="0" role="button" aria-labelledby="new-card-icon-label">
-            <img id="new-card-icon-preview" class="dropzone-preview hidden" alt="">
+          <label id="pm-form-icon-label">Icône (optionnelle)</label>
+          <div id="pm-form-dropzone" class="dropzone dropzone-small" tabindex="0" role="button" aria-labelledby="pm-form-icon-label">
+            <img id="pm-form-icon-preview" class="dropzone-preview hidden" alt="">
             <p class="dropzone-text">Glisse une icône ou clique pour parcourir</p>
           </div>
-          <input type="file" id="new-card-icon-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
+          <input type="file" id="pm-form-icon-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
+          <button type="button" id="pm-form-icon-remove" class="link-btn hidden">Retirer l'icône</button>
 
-          <p id="new-card-error" class="auth-error hidden" role="alert"></p>
+          <p id="pm-form-error" class="auth-error hidden" role="alert"></p>
 
           <div class="new-card-actions">
-            <button type="button" id="new-card-confirm" class="btn btn-primary btn-sm">Ajouter cette CB</button>
-            <button type="button" id="new-card-cancel" class="btn btn-ghost btn-sm">Annuler</button>
+            <button type="button" id="pm-form-confirm" class="btn btn-primary btn-sm">Enregistrer</button>
+            <button type="button" id="pm-form-cancel" class="btn btn-ghost btn-sm">Annuler</button>
           </div>
         </div>
 

@@ -3,20 +3,30 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+const DEFAULT_LOGO_BG = '#F5F6F8';
+
 const state = {
   session: null,
-  cards: [],
+  paymentMethods: [],
   subscriptions: [],
 };
 
-let selectedCardId = null;
+let selectedPaymentMethodId = null;
 let addLogoBlob = null;
 let addLogoType = null;
 let removeLogoFlag = false;
+let subLogoBgColor = null;
 let editingSubscription = null;
-let newCardIconBlob = null;
-let newCardIconType = null;
+let pmFormEditingId = null;
+let pmIconBlob = null;
+let pmIconType = null;
+let pmIconRemoveFlag = false;
 let lastFocusedElement = null;
+
+const PENCIL_SVG =
+  '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.5 1.5a1.5 1.5 0 0 1 2.12 0l.88.88a1.5 1.5 0 0 1 0 2.12l-8 8-3.5 1 1-3.5 8-8Z"/></svg>';
+const TRASH_SVG =
+  '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2h4a1 1 0 0 1 1 1v1h3v1.5H2V4h3V3a1 1 0 0 1 1-1Zm-2 4h8l-.6 8.2a1 1 0 0 1-1 .8H5.6a1 1 0 0 1-1-.8L4 6Z"/></svg>';
 
 const el = {
   loading: document.getElementById('app-loading'),
@@ -47,6 +57,9 @@ const el = {
   addLogoInput: document.getElementById('add-logo-input'),
   addLogoPreview: document.getElementById('add-logo-preview'),
   addLogoRemoveBtn: document.getElementById('add-logo-remove-btn'),
+  addLogoColorRow: document.getElementById('add-logo-color-row'),
+  addLogoColorInput: document.getElementById('add-logo-color-input'),
+  addLogoColorAuto: document.getElementById('add-logo-color-auto'),
   addPrice: document.getElementById('add-price'),
   addFormError: document.getElementById('add-form-error'),
   addSubmitBtn: document.getElementById('add-submit-btn'),
@@ -57,22 +70,25 @@ const el = {
   deleteConfirmBtn: document.getElementById('delete-confirm-btn'),
   deleteCancelBtn: document.getElementById('delete-cancel-btn'),
 
-  addCardChip: document.getElementById('add-card-chip'),
-  addCardChipIcon: document.getElementById('add-card-chip-icon'),
-  addCardChipLabel: document.getElementById('add-card-chip-label'),
-  addCardChipRemove: document.getElementById('add-card-chip-remove'),
-  addCardInputWrap: document.getElementById('add-card-input-wrap'),
-  addCardInput: document.getElementById('add-card-input'),
-  addCardSuggestions: document.getElementById('add-card-suggestions'),
+  pmChip: document.getElementById('pm-chip'),
+  pmChipIcon: document.getElementById('pm-chip-icon'),
+  pmChipLabel: document.getElementById('pm-chip-label'),
+  pmChipRemove: document.getElementById('pm-chip-remove'),
+  pmInputWrap: document.getElementById('pm-input-wrap'),
+  pmInput: document.getElementById('pm-input'),
+  pmSuggestions: document.getElementById('pm-suggestions'),
+  pmInlineError: document.getElementById('pm-inline-error'),
 
-  newCardForm: document.getElementById('new-card-form'),
-  newCardLabel: document.getElementById('new-card-label'),
-  newCardDropzone: document.getElementById('new-card-dropzone'),
-  newCardIconInput: document.getElementById('new-card-icon-input'),
-  newCardIconPreview: document.getElementById('new-card-icon-preview'),
-  newCardError: document.getElementById('new-card-error'),
-  newCardConfirm: document.getElementById('new-card-confirm'),
-  newCardCancel: document.getElementById('new-card-cancel'),
+  pmForm: document.getElementById('pm-form'),
+  pmFormTitle: document.getElementById('pm-form-title'),
+  pmFormLabel: document.getElementById('pm-form-label'),
+  pmFormDropzone: document.getElementById('pm-form-dropzone'),
+  pmFormIconInput: document.getElementById('pm-form-icon-input'),
+  pmFormIconPreview: document.getElementById('pm-form-icon-preview'),
+  pmFormIconRemove: document.getElementById('pm-form-icon-remove'),
+  pmFormError: document.getElementById('pm-form-error'),
+  pmFormConfirm: document.getElementById('pm-form-confirm'),
+  pmFormCancel: document.getElementById('pm-form-cancel'),
 };
 
 const IMAGE_EXT_BY_TYPE = {
@@ -169,7 +185,7 @@ function showAuthScreen() {
   el.signupForm.reset();
   switchAuthTab('login');
   state.session = null;
-  state.cards = [];
+  state.paymentMethods = [];
   state.subscriptions = [];
 }
 
@@ -215,14 +231,14 @@ async function loadData() {
   el.subscriptionsGrid.innerHTML = '';
 
   try {
-    const [cardsRes, subsRes] = await Promise.all([
-      sb.from('payment_cards').select('*').order('created_at', { ascending: true }),
+    const [methodsRes, subsRes] = await Promise.all([
+      sb.from('payment_methods').select('*').order('created_at', { ascending: true }),
       sb.from('subscriptions').select('*').order('created_at', { ascending: true }),
     ]);
-    if (cardsRes.error) throw cardsRes.error;
+    if (methodsRes.error) throw methodsRes.error;
     if (subsRes.error) throw subsRes.error;
 
-    state.cards = cardsRes.data;
+    state.paymentMethods = methodsRes.data;
     state.subscriptions = subsRes.data;
     el.subscriptionsLoading.classList.add('hidden');
     renderAll();
@@ -272,6 +288,14 @@ function getPublicUrl(path) {
   return sb.storage.from('images').getPublicUrl(path).data.publicUrl;
 }
 
+function isColorDark(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.5;
+}
+
 // Rendering -------------------------------------------------------------
 
 function renderAll() {
@@ -287,20 +311,17 @@ function renderHeaderStats() {
   el.subscriptionsTotal.textContent = formatEuroFromCents(totalCents);
 }
 
-function createCardPill(card) {
-  const pill = h('span', 'card-pill');
+function createPaymentMethodIconEl(method) {
   const iconWrap = h('span', 'card-pill-icon');
-  if (card.icon_path) {
+  if (method.icon_path) {
     const img = document.createElement('img');
-    img.src = getPublicUrl(card.icon_path);
+    img.src = getPublicUrl(method.icon_path);
     img.alt = '';
     iconWrap.appendChild(img);
   } else {
-    iconWrap.textContent = (card.label[0] || '?').toUpperCase();
+    iconWrap.textContent = (method.label[0] || '?').toUpperCase();
   }
-  pill.appendChild(iconWrap);
-  pill.appendChild(h('span', '', card.label));
-  return pill;
+  return iconWrap;
 }
 
 function createSubscriptionCard(sub) {
@@ -308,6 +329,7 @@ function createSubscriptionCard(sub) {
   card.dataset.id = sub.id;
 
   const logoBox = h('div', 'sub-logo-box');
+  let initialsEl = null;
   if (sub.logo_path) {
     const img = document.createElement('img');
     img.className = 'sub-logo-img';
@@ -315,25 +337,35 @@ function createSubscriptionCard(sub) {
     img.src = getPublicUrl(sub.logo_path);
     logoBox.appendChild(img);
   } else {
-    logoBox.appendChild(h('div', 'sub-logo-initials', initials(sub.name)));
+    initialsEl = h('div', 'sub-logo-initials', initials(sub.name));
+    logoBox.appendChild(initialsEl);
+  }
+  if (sub.logo_bg_color) {
+    logoBox.style.backgroundColor = sub.logo_bg_color;
+    if (initialsEl && isColorDark(sub.logo_bg_color)) {
+      initialsEl.classList.add('sub-logo-initials--dark');
+    }
   }
   card.appendChild(logoBox);
 
   const body = h('div', 'sub-body');
   body.appendChild(h('h3', 'sub-name', sub.name));
 
-  const linkedCard = state.cards.find((c) => c.id === sub.payment_card_id);
-  if (linkedCard) {
-    body.appendChild(createCardPill(linkedCard));
-  }
-
-  const footer = h('div', 'sub-footer');
   const priceEl = h('p', 'sub-price');
   const parts = formatPriceParts(sub.monthly_price);
   priceEl.appendChild(h('span', 'price-int', parts.intPart));
   priceEl.appendChild(h('span', 'price-cents', parts.rest));
-  footer.appendChild(priceEl);
+  body.appendChild(priceEl);
 
+  const linkedMethod = state.paymentMethods.find((m) => m.id === sub.payment_method_id);
+  if (linkedMethod) {
+    const methodLine = h('div', 'sub-payment-method');
+    methodLine.appendChild(createPaymentMethodIconEl(linkedMethod));
+    methodLine.appendChild(h('span', '', linkedMethod.label));
+    body.appendChild(methodLine);
+  }
+
+  const footer = h('div', 'sub-footer');
   const viewLink = document.createElement('a');
   viewLink.href = '#';
   viewLink.className = 'sub-view';
@@ -343,8 +375,8 @@ function createSubscriptionCard(sub) {
     openEditModal(sub);
   });
   footer.appendChild(viewLink);
-
   body.appendChild(footer);
+
   card.appendChild(body);
   return card;
 }
@@ -410,10 +442,80 @@ el.addModalOverlay.addEventListener('click', (event) => {
 el.addModalClose.addEventListener('click', closeAddModal);
 el.addFab.addEventListener('click', openAddModal);
 
-// Add form: image handling ------------------------------------------------
+// Image handling ------------------------------------------------------
 
 function extForType(type) {
   return IMAGE_EXT_BY_TYPE[type] || 'png';
+}
+
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+async function detectBgColorFromBitmap(bitmap) {
+  const size = 48;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, size, size);
+  const { data } = ctx.getImageData(0, 0, size, size);
+
+  const counts = new Map();
+  let opaque = 0;
+  let total = 0;
+
+  function sample(x, y) {
+    const idx = (y * size + x) * 4;
+    total += 1;
+    if (data[idx + 3] < 32) return;
+    opaque += 1;
+    const key = `${data[idx]},${data[idx + 1]},${data[idx + 2]}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  for (let x = 0; x < size; x++) {
+    sample(x, 0);
+    sample(x, size - 1);
+  }
+  for (let y = 0; y < size; y++) {
+    sample(0, y);
+    sample(size - 1, y);
+  }
+
+  if (total === 0 || opaque / total < 0.5) return null;
+
+  let bestKey = null;
+  let bestCount = -1;
+  counts.forEach((count, key) => {
+    if (count > bestCount) {
+      bestCount = count;
+      bestKey = key;
+    }
+  });
+  if (!bestKey) return null;
+  const [r, g, b] = bestKey.split(',').map(Number);
+  return rgbToHex(r, g, b);
+}
+
+async function detectLogoBgColor(file) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    return await detectBgColorFromBitmap(bitmap);
+  } catch (error) {
+    return null;
+  }
+}
+
+async function detectLogoBgColorFromUrl(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    return await detectBgColorFromBitmap(bitmap);
+  } catch (error) {
+    return null;
+  }
 }
 
 async function processImageFile(file, maxDim) {
@@ -459,190 +561,397 @@ function setupDropzone(zoneEl, inputEl, previewEl, maxDim, onProcessed) {
     const blob = await processImageFile(file, maxDim);
     previewEl.src = URL.createObjectURL(blob);
     previewEl.classList.remove('hidden');
-    onProcessed(blob, file.type);
+    onProcessed(blob, file.type, file);
   }
 }
 
-setupDropzone(el.addLogoDropzone, el.addLogoInput, el.addLogoPreview, 400, (blob, type) => {
+function updateLogoColorUI() {
+  const hasLogo = !el.addLogoPreview.classList.contains('hidden');
+  el.addLogoColorRow.classList.toggle('hidden', !hasLogo);
+  el.addLogoColorInput.value = subLogoBgColor || DEFAULT_LOGO_BG;
+  el.addLogoColorAuto.classList.toggle('hidden', !hasLogo);
+}
+
+setupDropzone(el.addLogoDropzone, el.addLogoInput, el.addLogoPreview, 400, async (blob, type, file) => {
   addLogoBlob = blob;
   addLogoType = type;
   removeLogoFlag = false;
   el.addLogoRemoveBtn.classList.remove('hidden');
+  subLogoBgColor = await detectLogoBgColor(file);
+  updateLogoColorUI();
 });
 
 el.addLogoRemoveBtn.addEventListener('click', () => {
   addLogoBlob = null;
   addLogoType = null;
   removeLogoFlag = true;
+  subLogoBgColor = null;
   el.addLogoPreview.classList.add('hidden');
   el.addLogoPreview.src = '';
   el.addLogoInput.value = '';
   el.addLogoRemoveBtn.classList.add('hidden');
+  updateLogoColorUI();
 });
 
-setupDropzone(el.newCardDropzone, el.newCardIconInput, el.newCardIconPreview, 64, (blob, type) => {
-  newCardIconBlob = blob;
-  newCardIconType = type;
+el.addLogoColorInput.addEventListener('input', () => {
+  subLogoBgColor = el.addLogoColorInput.value.toUpperCase();
 });
 
-// Add form: card tag field ------------------------------------------------
+el.addLogoColorAuto.addEventListener('click', async () => {
+  let detected = null;
+  if (addLogoBlob) {
+    detected = await detectLogoBgColor(addLogoBlob);
+  } else if (editingSubscription && editingSubscription.logo_path && !removeLogoFlag) {
+    detected = await detectLogoBgColorFromUrl(getPublicUrl(editingSubscription.logo_path));
+  }
+  subLogoBgColor = detected;
+  updateLogoColorUI();
+});
+
+setupDropzone(el.pmFormDropzone, el.pmFormIconInput, el.pmFormIconPreview, 64, (blob, type) => {
+  pmIconBlob = blob;
+  pmIconType = type;
+  pmIconRemoveFlag = false;
+  el.pmFormIconRemove.classList.remove('hidden');
+});
+
+el.pmFormIconRemove.addEventListener('click', () => {
+  pmIconBlob = null;
+  pmIconType = null;
+  pmIconRemoveFlag = true;
+  el.pmFormIconPreview.classList.add('hidden');
+  el.pmFormIconPreview.src = '';
+  el.pmFormIconRemove.classList.add('hidden');
+});
+
+// Payment method: tag field, autocomplete, inline create/edit/delete --------
 
 function hasCardNumberLikeDigits(text) {
   return (text.match(/\d/g) || []).length >= 12;
 }
 
-function renderCardSuggestions(query) {
-  const q = query.trim().toLowerCase();
-  el.addCardSuggestions.innerHTML = '';
-  if (!q) {
-    el.addCardSuggestions.classList.add('hidden');
-    return;
-  }
-  const matches = state.cards.filter((c) => c.label.toLowerCase().includes(q));
-  if (matches.length === 0) {
-    el.addCardSuggestions.classList.add('hidden');
-    return;
-  }
-  matches.forEach((card) => {
-    const li = document.createElement('li');
-    li.setAttribute('role', 'option');
-    const iconWrap = h('span', 'card-pill-icon');
-    if (card.icon_path) {
-      const img = document.createElement('img');
-      img.src = getPublicUrl(card.icon_path);
-      img.alt = '';
-      iconWrap.appendChild(img);
-    } else {
-      iconWrap.textContent = (card.label[0] || '?').toUpperCase();
-    }
-    li.appendChild(iconWrap);
-    li.appendChild(h('span', '', card.label));
-    li.addEventListener('click', () => selectCard(card));
-    el.addCardSuggestions.appendChild(li);
-  });
-  el.addCardSuggestions.classList.remove('hidden');
-}
-
-function selectCard(card) {
-  selectedCardId = card.id;
-  el.addCardInputWrap.classList.add('hidden');
-  el.addCardSuggestions.classList.add('hidden');
-  el.addCardInput.value = '';
-  el.addCardChip.classList.remove('hidden');
-  el.addCardChipLabel.textContent = card.label;
-  el.addCardChipIcon.innerHTML = '';
-  if (card.icon_path) {
-    const img = document.createElement('img');
-    img.src = getPublicUrl(card.icon_path);
-    img.alt = '';
-    el.addCardChipIcon.appendChild(img);
-  } else {
-    el.addCardChipIcon.textContent = (card.label[0] || '?').toUpperCase();
-  }
-}
-
-function clearSelectedCard() {
-  selectedCardId = null;
-  el.addCardChip.classList.add('hidden');
-  el.addCardChipIcon.innerHTML = '';
-  el.addCardInputWrap.classList.remove('hidden');
-  el.addCardInput.value = '';
-}
-
-el.addCardChipRemove.addEventListener('click', clearSelectedCard);
-
-el.addCardInput.addEventListener('input', () => renderCardSuggestions(el.addCardInput.value));
-
-el.addCardInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    const value = el.addCardInput.value.trim();
-    if (!value) return;
-    const exact = state.cards.find((c) => c.label.toLowerCase() === value.toLowerCase());
-    if (exact) {
-      selectCard(exact);
-      return;
-    }
-    openNewCardForm(value);
-  } else if (event.key === 'Escape') {
-    el.addCardSuggestions.classList.add('hidden');
-  }
-});
-
-document.addEventListener('click', (event) => {
-  if (event.target !== el.addCardInput && !el.addCardSuggestions.contains(event.target)) {
-    el.addCardSuggestions.classList.add('hidden');
-  }
-});
-
-function showNewCardError(message) {
-  el.newCardError.textContent = message;
-  el.newCardError.classList.remove('hidden');
-}
-
-function openNewCardForm(label) {
-  el.addCardInputWrap.classList.add('hidden');
-  el.addCardSuggestions.classList.add('hidden');
-  el.newCardForm.classList.remove('hidden');
-  el.newCardLabel.value = label;
-  el.newCardError.classList.add('hidden');
-  newCardIconBlob = null;
-  newCardIconType = null;
-  el.newCardIconPreview.classList.add('hidden');
-  el.newCardIconPreview.src = '';
-  el.newCardLabel.focus();
-}
-
-function closeNewCardForm() {
-  el.newCardForm.classList.add('hidden');
-  el.addCardInputWrap.classList.remove('hidden');
-  el.addCardInput.value = '';
-}
-
-el.newCardCancel.addEventListener('click', closeNewCardForm);
-
-el.newCardConfirm.addEventListener('click', async () => {
-  const label = el.newCardLabel.value.trim();
-  el.newCardError.classList.add('hidden');
-
-  if (!label) return showNewCardError('Le libellé est obligatoire.');
-  if (label.length > 40) return showNewCardError('40 caractères maximum.');
+function validatePaymentMethodLabel(label, excludeId) {
+  if (!label) return 'Le libellé est obligatoire.';
+  if (label.length > 40) return '40 caractères maximum.';
   if (hasCardNumberLikeDigits(label)) {
-    return showNewCardError('Un libellé seulement, jamais le numéro de carte.');
+    return "Un libellé seulement, jamais un numéro de carte ou d'IBAN.";
   }
-  if (state.cards.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
-    return showNewCardError('Une CB avec ce libellé existe déjà.');
+  const duplicate = state.paymentMethods.some(
+    (m) => m.label.toLowerCase() === label.toLowerCase() && m.id !== excludeId
+  );
+  if (duplicate) return 'Un moyen de paiement avec ce libellé existe déjà.';
+  return null;
+}
+
+function showPmInlineError(message) {
+  el.pmInlineError.textContent = message;
+  el.pmInlineError.classList.remove('hidden');
+}
+
+function hidePmInlineError() {
+  el.pmInlineError.classList.add('hidden');
+}
+
+function selectPaymentMethod(method, opts = {}) {
+  selectedPaymentMethodId = method.id;
+  el.pmInputWrap.classList.add('hidden');
+  el.pmSuggestions.classList.add('hidden');
+  el.pmInput.value = '';
+  hidePmInlineError();
+  el.pmChip.classList.remove('hidden');
+  el.pmChipLabel.textContent = method.label;
+  el.pmChipIcon.innerHTML = '';
+  if (method.icon_path) {
+    const img = document.createElement('img');
+    img.src = getPublicUrl(method.icon_path);
+    img.alt = '';
+    el.pmChipIcon.appendChild(img);
+  } else {
+    el.pmChipIcon.textContent = (method.label[0] || '?').toUpperCase();
+  }
+  if (opts.animate) {
+    el.pmChip.classList.remove('card-chip--confirm');
+    void el.pmChip.offsetWidth;
+    el.pmChip.classList.add('card-chip--confirm');
+  }
+}
+
+function clearSelectedPaymentMethod() {
+  selectedPaymentMethodId = null;
+  el.pmChip.classList.add('hidden');
+  el.pmChip.classList.remove('card-chip--confirm');
+  el.pmChipIcon.innerHTML = '';
+  el.pmInputWrap.classList.remove('hidden');
+  el.pmInput.value = '';
+  hidePmInlineError();
+}
+
+el.pmChipRemove.addEventListener('click', clearSelectedPaymentMethod);
+
+function buildCreateOption(label) {
+  const li = document.createElement('li');
+  li.className = 'suggestion-create';
+  li.setAttribute('role', 'option');
+  li.appendChild(h('span', 'suggestion-create-text', `+ Créer « ${label} »`));
+  li.appendChild(h('span', 'kbd-badge', 'Entrée ↵'));
+  li.addEventListener('click', () => quickCreatePaymentMethod(label));
+  return li;
+}
+
+function buildSuggestionRow(method, isExact) {
+  const li = document.createElement('li');
+  li.className = isExact ? 'suggestion-row suggestion-row--exact' : 'suggestion-row';
+  li.setAttribute('role', 'option');
+
+  const main = h('div', 'suggestion-main');
+  main.appendChild(createPaymentMethodIconEl(method));
+  main.appendChild(h('span', '', method.label));
+  main.addEventListener('click', () => selectPaymentMethod(method, { animate: true }));
+  li.appendChild(main);
+
+  const actions = h('div', 'suggestion-actions');
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'icon-btn';
+  editBtn.setAttribute('aria-label', `Modifier ${method.label}`);
+  editBtn.innerHTML = PENCIL_SVG;
+  editBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openEditPaymentMethodForm(method);
+  });
+  actions.appendChild(editBtn);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'icon-btn';
+  deleteBtn.setAttribute('aria-label', `Supprimer ${method.label}`);
+  deleteBtn.innerHTML = TRASH_SVG;
+  deleteBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    requestDeletePaymentMethod(method, li);
+  });
+  actions.appendChild(deleteBtn);
+
+  li.appendChild(actions);
+  return li;
+}
+
+function renderSuggestions(query) {
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+  el.pmSuggestions.innerHTML = '';
+
+  const list = state.paymentMethods
+    .filter((m) => !q || m.label.toLowerCase().includes(qLower))
+    .sort((a, b) => {
+      const aExact = a.label.toLowerCase() === qLower;
+      const bExact = b.label.toLowerCase() === qLower;
+      if (aExact !== bExact) return aExact ? -1 : 1;
+      return 0;
+    });
+  const hasExact = list.some((m) => m.label.toLowerCase() === qLower);
+
+  if (q && !hasExact) {
+    el.pmSuggestions.appendChild(buildCreateOption(q));
   }
 
-  el.newCardConfirm.disabled = true;
+  list.forEach((method) => {
+    const isExact = method.label.toLowerCase() === qLower;
+    el.pmSuggestions.appendChild(buildSuggestionRow(method, isExact));
+  });
+
+  el.pmSuggestions.classList.toggle('hidden', el.pmSuggestions.children.length === 0);
+}
+
+async function quickCreatePaymentMethod(label) {
+  const validationError = validatePaymentMethodLabel(label, null);
+  if (validationError) {
+    showPmInlineError(validationError);
+    return false;
+  }
   try {
-    let iconPath = null;
-    if (newCardIconBlob) {
-      iconPath = `${state.session.user.id}/cards/${crypto.randomUUID()}.${extForType(newCardIconType)}`;
+    const { data, error } = await sb
+      .from('payment_methods')
+      .insert({ id: crypto.randomUUID(), label })
+      .select()
+      .single();
+    if (error) throw error;
+    state.paymentMethods.push(data);
+    selectPaymentMethod(data, { animate: true });
+    return true;
+  } catch (error) {
+    showPmInlineError(friendlyErrorMessage(error));
+    return false;
+  }
+}
+
+function openEditPaymentMethodForm(method) {
+  pmFormEditingId = method.id;
+  pmIconBlob = null;
+  pmIconType = null;
+  pmIconRemoveFlag = false;
+
+  el.pmInputWrap.classList.add('hidden');
+  el.pmSuggestions.classList.add('hidden');
+  el.pmForm.classList.remove('hidden');
+  el.pmFormTitle.textContent = 'Modifier le moyen de paiement';
+  el.pmFormLabel.value = method.label;
+  el.pmFormError.classList.add('hidden');
+
+  if (method.icon_path) {
+    el.pmFormIconPreview.src = getPublicUrl(method.icon_path);
+    el.pmFormIconPreview.classList.remove('hidden');
+    el.pmFormIconRemove.classList.remove('hidden');
+  } else {
+    el.pmFormIconPreview.classList.add('hidden');
+    el.pmFormIconPreview.src = '';
+    el.pmFormIconRemove.classList.add('hidden');
+  }
+  el.pmFormLabel.focus();
+}
+
+function closePmForm() {
+  el.pmForm.classList.add('hidden');
+  el.pmInputWrap.classList.remove('hidden');
+  pmFormEditingId = null;
+  el.pmInput.value = '';
+}
+
+el.pmFormCancel.addEventListener('click', closePmForm);
+
+el.pmFormConfirm.addEventListener('click', async () => {
+  if (!pmFormEditingId) return;
+  const label = el.pmFormLabel.value.trim();
+  el.pmFormError.classList.add('hidden');
+
+  const validationError = validatePaymentMethodLabel(label, pmFormEditingId);
+  if (validationError) {
+    el.pmFormError.textContent = validationError;
+    el.pmFormError.classList.remove('hidden');
+    return;
+  }
+
+  el.pmFormConfirm.disabled = true;
+  try {
+    const method = state.paymentMethods.find((m) => m.id === pmFormEditingId);
+    const previousIconPath = method.icon_path;
+    let iconPath = previousIconPath;
+
+    if (pmIconBlob) {
+      iconPath = `${state.session.user.id}/payment-methods/${crypto.randomUUID()}.${extForType(pmIconType)}`;
       const { error: uploadError } = await sb.storage
         .from('images')
-        .upload(iconPath, newCardIconBlob, { contentType: newCardIconType });
+        .upload(iconPath, pmIconBlob, { contentType: pmIconType });
       if (uploadError) throw uploadError;
+    } else if (pmIconRemoveFlag) {
+      iconPath = null;
     }
 
     const { data, error } = await sb
-      .from('payment_cards')
-      .insert({ id: crypto.randomUUID(), label, icon_path: iconPath })
+      .from('payment_methods')
+      .update({ label, icon_path: iconPath })
+      .eq('id', pmFormEditingId)
       .select()
       .single();
     if (error) throw error;
 
-    state.cards.push(data);
-    closeNewCardForm();
-    selectCard(data);
+    if (previousIconPath && previousIconPath !== iconPath) {
+      await sb.storage.from('images').remove([previousIconPath]).catch(() => {});
+    }
+
+    const idx = state.paymentMethods.findIndex((m) => m.id === data.id);
+    state.paymentMethods[idx] = data;
+    if (selectedPaymentMethodId === data.id) {
+      selectPaymentMethod(data);
+    }
+    renderAll();
+    closePmForm();
+    renderSuggestions('');
   } catch (error) {
-    showNewCardError(friendlyErrorMessage(error));
+    el.pmFormError.textContent = friendlyErrorMessage(error);
+    el.pmFormError.classList.remove('hidden');
   } finally {
-    el.newCardConfirm.disabled = false;
+    el.pmFormConfirm.disabled = false;
   }
 });
 
-// Add form: submit --------------------------------------------------------
+function requestDeletePaymentMethod(method, rowEl) {
+  const count = state.subscriptions.filter((s) => s.payment_method_id === method.id).length;
+  const message =
+    count === 0
+      ? "Aucun abonnement ne l'utilise. Supprimer ce moyen de paiement ?"
+      : `Utilisé par ${count} abonnement${count === 1 ? '' : 's'}, ils n'auront plus de moyen de paiement. Supprimer ?`;
+
+  rowEl.innerHTML = '';
+  rowEl.className = 'suggestion-confirm';
+  rowEl.appendChild(h('p', 'suggestion-confirm-text', message));
+
+  const actions = h('div', 'suggestion-confirm-actions');
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'btn btn-danger btn-sm';
+  confirmBtn.textContent = 'Supprimer';
+  confirmBtn.addEventListener('click', () => deletePaymentMethod(method));
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn btn-ghost btn-sm';
+  cancelBtn.textContent = 'Annuler';
+  cancelBtn.addEventListener('click', () => renderSuggestions(el.pmInput.value));
+
+  actions.appendChild(confirmBtn);
+  actions.appendChild(cancelBtn);
+  rowEl.appendChild(actions);
+}
+
+async function deletePaymentMethod(method) {
+  try {
+    const { error } = await sb.from('payment_methods').delete().eq('id', method.id);
+    if (error) throw error;
+    if (method.icon_path) {
+      await sb.storage.from('images').remove([method.icon_path]).catch(() => {});
+    }
+    state.paymentMethods = state.paymentMethods.filter((m) => m.id !== method.id);
+    state.subscriptions = state.subscriptions.map((s) =>
+      s.payment_method_id === method.id ? { ...s, payment_method_id: null } : s
+    );
+    if (selectedPaymentMethodId === method.id) {
+      clearSelectedPaymentMethod();
+    }
+    renderAll();
+    renderSuggestions(el.pmInput.value);
+  } catch (error) {
+    showPmInlineError(friendlyErrorMessage(error));
+  }
+}
+
+el.pmInput.addEventListener('input', () => renderSuggestions(el.pmInput.value));
+el.pmInput.addEventListener('focus', () => renderSuggestions(el.pmInput.value));
+
+el.pmInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const value = el.pmInput.value.trim();
+    if (!value) return;
+    const exact = state.paymentMethods.find((m) => m.label.toLowerCase() === value.toLowerCase());
+    if (exact) {
+      selectPaymentMethod(exact, { animate: true });
+      return;
+    }
+    quickCreatePaymentMethod(value);
+  } else if (event.key === 'Escape') {
+    el.pmSuggestions.classList.add('hidden');
+  }
+});
+
+document.addEventListener('click', (event) => {
+  if (event.target !== el.pmInput && !el.pmSuggestions.contains(event.target)) {
+    el.pmSuggestions.classList.add('hidden');
+  }
+});
+
+// Add/edit subscription form ----------------------------------------------
 
 function parsePriceInput(raw) {
   const cleaned = raw.trim().replace(',', '.');
@@ -666,11 +975,13 @@ function resetAddForm() {
   addLogoBlob = null;
   addLogoType = null;
   removeLogoFlag = false;
+  subLogoBgColor = null;
   el.addLogoPreview.classList.add('hidden');
   el.addLogoPreview.src = '';
   el.addLogoRemoveBtn.classList.add('hidden');
-  clearSelectedCard();
-  closeNewCardForm();
+  updateLogoColorUI();
+  clearSelectedPaymentMethod();
+  closePmForm();
   hideAddFormError();
   el.deleteConfirm.classList.add('hidden');
   el.deleteSubBtn.classList.remove('hidden');
@@ -699,11 +1010,13 @@ function openEditModal(sub) {
     el.addLogoPreview.src = getPublicUrl(sub.logo_path);
     el.addLogoPreview.classList.remove('hidden');
     el.addLogoRemoveBtn.classList.remove('hidden');
+    subLogoBgColor = sub.logo_bg_color || null;
+    updateLogoColorUI();
   }
 
-  const linkedCard = state.cards.find((c) => c.id === sub.payment_card_id);
-  if (linkedCard) {
-    selectCard(linkedCard);
+  const linkedMethod = state.paymentMethods.find((m) => m.id === sub.payment_method_id);
+  if (linkedMethod) {
+    selectPaymentMethod(linkedMethod);
   }
 
   openModal(el.addModalOverlay, el.addModal);
@@ -717,6 +1030,17 @@ function closeAddModal() {
 el.addForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   hideAddFormError();
+
+  const pendingPmText = el.pmInput.value.trim();
+  if (pendingPmText) {
+    const exact = state.paymentMethods.find((m) => m.label.toLowerCase() === pendingPmText.toLowerCase());
+    if (exact) {
+      selectPaymentMethod(exact);
+    } else {
+      const created = await quickCreatePaymentMethod(pendingPmText);
+      if (!created) return;
+    }
+  }
 
   const name = el.addName.value.trim();
   if (!name) return showAddFormError('Le nom est obligatoire.');
@@ -746,7 +1070,8 @@ el.addForm.addEventListener('submit', async (event) => {
       name,
       monthly_price: priceValue,
       logo_path: logoPath,
-      payment_card_id: selectedCardId,
+      logo_bg_color: logoPath ? subLogoBgColor : null,
+      payment_method_id: selectedPaymentMethodId,
     };
 
     let saved;

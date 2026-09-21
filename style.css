@@ -329,18 +329,6 @@ body {
   margin: 0;
 }
 
-.card-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: #F0F2F5;
-  border-radius: 20px;
-  padding: 4px 10px 4px 4px;
-  width: fit-content;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
 .card-pill-icon {
   width: 18px;
   height: 18px;
@@ -365,7 +353,7 @@ body {
 .sub-footer {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 4px;
 }
 
@@ -537,10 +525,6 @@ body {
 }
 
 .suggestions {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
   background: var(--color-white);
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -550,7 +534,6 @@ body {
   list-style: none;
   padding: 4px;
   box-shadow: var(--shadow);
-  z-index: 10;
 }
 
 .suggestions li {
@@ -629,6 +612,190 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Logo background color picker */
+
+.logo-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.logo-color-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.logo-color-row input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  background: none;
+}
+
+/* Payment method suggestions */
+
+.pm-form-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.suggestions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.suggestion-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.suggestion-main span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-row--exact .suggestion-main {
+  font-weight: 600;
+}
+
+.suggestion-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.suggestions li:hover .icon-btn,
+.suggestions li:focus-within .icon-btn {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .icon-btn {
+    opacity: 1;
+  }
+}
+
+.icon-btn:hover {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.suggestion-create {
+  background: var(--color-green-light);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.suggestion-create:hover {
+  background: var(--color-green-light);
+  filter: brightness(0.97);
+}
+
+.suggestion-create-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbd-badge {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.suggestion-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  width: 100%;
+}
+
+.suggestion-confirm-text {
+  font-size: 12px;
+  margin: 0;
+}
+
+.suggestion-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.card-chip {
+  animation-duration: 0.35s;
+  animation-timing-function: ease-out;
+}
+
+@keyframes chipPop {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.4;
+  }
+  60% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.card-chip--confirm {
+  animation-name: chipPop;
+}
+
+/* Payment method line on cards */
+
+.sub-payment-method {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.sub-logo-initials--dark {
+  background: transparent;
+  color: #fff;
 }
 
 @media (max-width: 900px) {
