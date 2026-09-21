@@ -5,6 +5,11 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const DEFAULT_LOGO_BG = '#F5F6F8';
 
+const PALETTE = [
+  '#6366F1', '#EC4899', '#F59E0B', '#10B981', '#3B82F6',
+  '#EF4444', '#8B5CF6', '#14B8A6', '#F97316', '#84CC16',
+];
+
 const state = {
   session: null,
   paymentMethods: [],
@@ -18,10 +23,12 @@ let removeLogoFlag = false;
 let subLogoBgColor = null;
 let editingSubscription = null;
 let pmFormEditingId = null;
+let pmFormColor = null;
 let pmIconBlob = null;
 let pmIconType = null;
 let pmIconRemoveFlag = false;
 let lastFocusedElement = null;
+let displayPeriod = loadPeriodPref();
 
 const PENCIL_SVG =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.5 1.5a1.5 1.5 0 0 1 2.12 0l.88.88a1.5 1.5 0 0 1 0 2.12l-8 8-3.5 1 1-3.5 8-8Z"/></svg>';
@@ -45,6 +52,7 @@ const el = {
   subscriptionsGrid: document.getElementById('subscriptions-grid'),
   subscriptionsCount: document.getElementById('subscriptions-count'),
   subscriptionsTotal: document.getElementById('subscriptions-total'),
+  periodOptions: document.querySelectorAll('.period-option'),
 
   addFab: document.getElementById('add-fab'),
   addModalOverlay: document.getElementById('add-modal-overlay'),
@@ -61,6 +69,7 @@ const el = {
   addLogoColorInput: document.getElementById('add-logo-color-input'),
   addLogoColorAuto: document.getElementById('add-logo-color-auto'),
   addPrice: document.getElementById('add-price'),
+  addPriceAnnualHint: document.getElementById('add-price-annual-hint'),
   addFormError: document.getElementById('add-form-error'),
   addSubmitBtn: document.getElementById('add-submit-btn'),
 
@@ -71,9 +80,11 @@ const el = {
   deleteCancelBtn: document.getElementById('delete-cancel-btn'),
 
   pmChip: document.getElementById('pm-chip'),
+  pmChipSwatch: document.getElementById('pm-chip-swatch'),
   pmChipIcon: document.getElementById('pm-chip-icon'),
   pmChipLabel: document.getElementById('pm-chip-label'),
   pmChipRemove: document.getElementById('pm-chip-remove'),
+  pmChipPalette: document.getElementById('pm-chip-palette'),
   pmInputWrap: document.getElementById('pm-input-wrap'),
   pmInput: document.getElementById('pm-input'),
   pmSuggestions: document.getElementById('pm-suggestions'),
@@ -86,6 +97,7 @@ const el = {
   pmFormIconInput: document.getElementById('pm-form-icon-input'),
   pmFormIconPreview: document.getElementById('pm-form-icon-preview'),
   pmFormIconRemove: document.getElementById('pm-form-icon-remove'),
+  pmFormPalette: document.getElementById('pm-form-palette'),
   pmFormError: document.getElementById('pm-form-error'),
   pmFormConfirm: document.getElementById('pm-form-confirm'),
   pmFormCancel: document.getElementById('pm-form-cancel'),
@@ -254,20 +266,41 @@ function toCents(price) {
   return Math.round(Number(price) * 100);
 }
 
-function formatPriceParts(price) {
-  const cents = toCents(price);
+function priceDisplayParts(monthlyCents, period) {
+  const cents = period === 'year' ? monthlyCents * 12 : monthlyCents;
+  const suffix = period === 'year' ? '€/an' : '€/mois';
   const intPart = Math.floor(cents / 100);
   const centsPart = String(cents % 100).padStart(2, '0');
   return {
     intPart: intPart.toLocaleString('fr-FR'),
-    rest: `,${centsPart}€/mois`,
+    rest: `,${centsPart}${suffix}`,
   };
 }
 
-function formatEuroFromCents(cents) {
-  const intPart = Math.floor(cents / 100);
-  const centsPart = String(cents % 100).padStart(2, '0');
-  return `${intPart.toLocaleString('fr-FR')},${centsPart}€/mois`;
+function loadPeriodPref() {
+  try {
+    const saved = localStorage.getItem('ideel-like:period');
+    if (saved === 'year' || saved === 'month') return saved;
+  } catch (error) {
+    // ignore storage access errors
+  }
+  return 'month';
+}
+
+function savePeriodPref(period) {
+  try {
+    localStorage.setItem('ideel-like:period', period);
+  } catch (error) {
+    // ignore storage access errors
+  }
+}
+
+function pulsePrices() {
+  document.querySelectorAll('.sub-price, .stats-total').forEach((elm) => {
+    elm.classList.remove('price-pulse');
+    void elm.offsetWidth;
+    elm.classList.add('price-pulse');
+  });
 }
 
 function initials(name) {
@@ -307,21 +340,139 @@ function renderHeaderStats() {
   const count = state.subscriptions.length;
   el.subscriptionsCount.textContent = `${count} abonnement${count === 1 ? '' : 's'}`;
 
-  const totalCents = state.subscriptions.reduce((sum, sub) => sum + toCents(sub.monthly_price), 0);
-  el.subscriptionsTotal.textContent = formatEuroFromCents(totalCents);
+  const totalMonthlyCents = state.subscriptions.reduce((sum, sub) => sum + toCents(sub.monthly_price), 0);
+  const parts = priceDisplayParts(totalMonthlyCents, displayPeriod);
+  el.subscriptionsTotal.innerHTML = '';
+  el.subscriptionsTotal.appendChild(h('span', 'price-int', parts.intPart));
+  el.subscriptionsTotal.appendChild(h('span', 'price-cents', parts.rest));
 }
 
-function createPaymentMethodIconEl(method) {
-  const iconWrap = h('span', 'card-pill-icon');
+function updatePeriodToggleUI() {
+  el.periodOptions.forEach((btn) => {
+    const active = btn.dataset.period === displayPeriod;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-checked', String(active));
+  });
+}
+
+el.periodOptions.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.period === displayPeriod) return;
+    displayPeriod = btn.dataset.period;
+    savePeriodPref(displayPeriod);
+    updatePeriodToggleUI();
+    renderAll();
+    pulsePrices();
+  });
+});
+
+updatePeriodToggleUI();
+
+const tagColorCache = new Map();
+
+function hexToRgb(hex) {
+  const clean = hex.replace('#', '');
+  return [0, 2, 4].map((i) => parseInt(clean.substr(i, 2), 16));
+}
+
+function mixHex(hexA, hexB, weightB) {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  const mixed = a.map((v, i) => Math.round(v * (1 - weightB) + b[i] * weightB));
+  return rgbToHex(mixed[0], mixed[1], mixed[2]);
+}
+
+function relLuminance(hex) {
+  const [r, g, b] = hexToRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(hexA, hexB) {
+  const L1 = relLuminance(hexA);
+  const L2 = relLuminance(hexB);
+  const lighter = Math.max(L1, L2);
+  const darker = Math.min(L1, L2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function deriveTagColors(baseHex) {
+  const key = baseHex.toUpperCase();
+  if (tagColorCache.has(key)) return tagColorCache.get(key);
+
+  const bg = mixHex(key, '#FFFFFF', 0.82);
+  let weight = 0.3;
+  let fg = mixHex(key, '#000000', weight);
+  while (contrastRatio(bg, fg) < 4.5 && weight < 0.9) {
+    weight += 0.05;
+    fg = mixHex(key, '#000000', weight);
+  }
+
+  const result = { bg, fg };
+  tagColorCache.set(key, result);
+  return result;
+}
+
+function pickColorForNewMethod() {
+  const usage = new Map(PALETTE.map((c) => [c, 0]));
+  state.paymentMethods.forEach((m) => {
+    if (usage.has(m.color)) usage.set(m.color, usage.get(m.color) + 1);
+  });
+  const unused = PALETTE.find((c) => usage.get(c) === 0);
+  if (unused) return unused;
+
+  let best = PALETTE[0];
+  let bestCount = Infinity;
+  PALETTE.forEach((c) => {
+    const n = usage.get(c);
+    if (n < bestCount) {
+      bestCount = n;
+      best = c;
+    }
+  });
+  return best;
+}
+
+function applyMethodTagStyle(pillEl, iconEl, method) {
+  const { bg, fg } = deriveTagColors(method.color || PALETTE[0]);
+  pillEl.style.backgroundColor = bg;
+  pillEl.style.color = fg;
+  iconEl.innerHTML = '';
   if (method.icon_path) {
+    iconEl.style.backgroundColor = 'transparent';
     const img = document.createElement('img');
     img.src = getPublicUrl(method.icon_path);
     img.alt = '';
-    iconWrap.appendChild(img);
+    iconEl.appendChild(img);
   } else {
-    iconWrap.textContent = (method.label[0] || '?').toUpperCase();
+    iconEl.style.backgroundColor = fg;
+    iconEl.style.color = bg;
+    iconEl.textContent = (method.label[0] || '?').toUpperCase();
   }
-  return iconWrap;
+}
+
+function createMethodTag(method) {
+  const tag = h('span', 'method-tag');
+  const icon = h('span', 'method-tag-icon');
+  applyMethodTagStyle(tag, icon, method);
+  tag.appendChild(icon);
+  tag.appendChild(h('span', 'method-tag-label', method.label));
+  return tag;
+}
+
+function renderColorPalette(container, currentColor, onPick) {
+  container.innerHTML = '';
+  PALETTE.forEach((color) => {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'color-dot' + (color === currentColor ? ' color-dot--selected' : '');
+    dot.style.backgroundColor = color;
+    dot.setAttribute('aria-label', `Couleur ${color}`);
+    dot.addEventListener('click', () => onPick(color));
+    container.appendChild(dot);
+  });
 }
 
 function createSubscriptionCard(sub) {
@@ -352,17 +503,14 @@ function createSubscriptionCard(sub) {
   body.appendChild(h('h3', 'sub-name', sub.name));
 
   const priceEl = h('p', 'sub-price');
-  const parts = formatPriceParts(sub.monthly_price);
+  const parts = priceDisplayParts(toCents(sub.monthly_price), displayPeriod);
   priceEl.appendChild(h('span', 'price-int', parts.intPart));
   priceEl.appendChild(h('span', 'price-cents', parts.rest));
   body.appendChild(priceEl);
 
   const linkedMethod = state.paymentMethods.find((m) => m.id === sub.payment_method_id);
   if (linkedMethod) {
-    const methodLine = h('div', 'sub-payment-method');
-    methodLine.appendChild(createPaymentMethodIconEl(linkedMethod));
-    methodLine.appendChild(h('span', '', linkedMethod.label));
-    body.appendChild(methodLine);
+    body.appendChild(createMethodTag(linkedMethod));
   }
 
   const footer = h('div', 'sub-footer');
@@ -656,19 +804,13 @@ function selectPaymentMethod(method, opts = {}) {
   selectedPaymentMethodId = method.id;
   el.pmInputWrap.classList.add('hidden');
   el.pmSuggestions.classList.add('hidden');
+  el.pmChipPalette.classList.add('hidden');
   el.pmInput.value = '';
   hidePmInlineError();
   el.pmChip.classList.remove('hidden');
   el.pmChipLabel.textContent = method.label;
-  el.pmChipIcon.innerHTML = '';
-  if (method.icon_path) {
-    const img = document.createElement('img');
-    img.src = getPublicUrl(method.icon_path);
-    img.alt = '';
-    el.pmChipIcon.appendChild(img);
-  } else {
-    el.pmChipIcon.textContent = (method.label[0] || '?').toUpperCase();
-  }
+  applyMethodTagStyle(el.pmChip, el.pmChipIcon, method);
+  el.pmChipRemove.style.color = deriveTagColors(method.color || PALETTE[0]).fg;
   if (opts.animate) {
     el.pmChip.classList.remove('card-chip--confirm');
     void el.pmChip.offsetWidth;
@@ -680,13 +822,61 @@ function clearSelectedPaymentMethod() {
   selectedPaymentMethodId = null;
   el.pmChip.classList.add('hidden');
   el.pmChip.classList.remove('card-chip--confirm');
+  el.pmChip.style.backgroundColor = '';
+  el.pmChip.style.color = '';
   el.pmChipIcon.innerHTML = '';
+  el.pmChipPalette.classList.add('hidden');
   el.pmInputWrap.classList.remove('hidden');
   el.pmInput.value = '';
   hidePmInlineError();
 }
 
-el.pmChipRemove.addEventListener('click', clearSelectedPaymentMethod);
+el.pmChipRemove.addEventListener('click', (event) => {
+  event.stopPropagation();
+  clearSelectedPaymentMethod();
+});
+
+el.pmChipSwatch.addEventListener('click', (event) => {
+  event.stopPropagation();
+  const method = state.paymentMethods.find((m) => m.id === selectedPaymentMethodId);
+  if (!method) return;
+
+  const isOpen = !el.pmChipPalette.classList.contains('hidden');
+  if (isOpen) {
+    el.pmChipPalette.classList.add('hidden');
+    return;
+  }
+
+  renderColorPalette(el.pmChipPalette, method.color, async (color) => {
+    await updatePaymentMethodColor(method, color);
+    el.pmChipPalette.classList.add('hidden');
+  });
+  el.pmChipPalette.classList.remove('hidden');
+});
+
+async function updatePaymentMethodColor(method, color) {
+  try {
+    const { data, error } = await sb
+      .from('payment_methods')
+      .update({ color })
+      .eq('id', method.id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    const idx = state.paymentMethods.findIndex((m) => m.id === data.id);
+    state.paymentMethods[idx] = data;
+    if (selectedPaymentMethodId === data.id) {
+      selectPaymentMethod(data);
+    }
+    renderAll();
+    if (!el.pmSuggestions.classList.contains('hidden')) {
+      renderSuggestions(el.pmInput.value);
+    }
+  } catch (error) {
+    showPmInlineError(friendlyErrorMessage(error));
+  }
+}
 
 function buildCreateOption(label) {
   const li = document.createElement('li');
@@ -704,8 +894,7 @@ function buildSuggestionRow(method, isExact) {
   li.setAttribute('role', 'option');
 
   const main = h('div', 'suggestion-main');
-  main.appendChild(createPaymentMethodIconEl(method));
-  main.appendChild(h('span', '', method.label));
+  main.appendChild(createMethodTag(method));
   main.addEventListener('click', () => selectPaymentMethod(method, { animate: true }));
   li.appendChild(main);
 
@@ -773,7 +962,7 @@ async function quickCreatePaymentMethod(label) {
   try {
     const { data, error } = await sb
       .from('payment_methods')
-      .insert({ id: crypto.randomUUID(), label })
+      .insert({ id: crypto.randomUUID(), label, color: pickColorForNewMethod() })
       .select()
       .single();
     if (error) throw error;
@@ -786,8 +975,16 @@ async function quickCreatePaymentMethod(label) {
   }
 }
 
+function renderPmFormPalette() {
+  renderColorPalette(el.pmFormPalette, pmFormColor, (color) => {
+    pmFormColor = color;
+    renderPmFormPalette();
+  });
+}
+
 function openEditPaymentMethodForm(method) {
   pmFormEditingId = method.id;
+  pmFormColor = method.color || PALETTE[0];
   pmIconBlob = null;
   pmIconType = null;
   pmIconRemoveFlag = false;
@@ -798,6 +995,7 @@ function openEditPaymentMethodForm(method) {
   el.pmFormTitle.textContent = 'Modifier le moyen de paiement';
   el.pmFormLabel.value = method.label;
   el.pmFormError.classList.add('hidden');
+  renderPmFormPalette();
 
   if (method.icon_path) {
     el.pmFormIconPreview.src = getPublicUrl(method.icon_path);
@@ -815,6 +1013,7 @@ function closePmForm() {
   el.pmForm.classList.add('hidden');
   el.pmInputWrap.classList.remove('hidden');
   pmFormEditingId = null;
+  pmFormColor = null;
   el.pmInput.value = '';
 }
 
@@ -850,7 +1049,7 @@ el.pmFormConfirm.addEventListener('click', async () => {
 
     const { data, error } = await sb
       .from('payment_methods')
-      .update({ label, icon_path: iconPath })
+      .update({ label, icon_path: iconPath, color: pmFormColor })
       .eq('id', pmFormEditingId)
       .select()
       .single();
@@ -949,6 +1148,9 @@ document.addEventListener('click', (event) => {
   if (event.target !== el.pmInput && !el.pmSuggestions.contains(event.target)) {
     el.pmSuggestions.classList.add('hidden');
   }
+  if (event.target !== el.pmChipSwatch && !el.pmChipPalette.contains(event.target)) {
+    el.pmChipPalette.classList.add('hidden');
+  }
 });
 
 // Add/edit subscription form ----------------------------------------------
@@ -970,6 +1172,20 @@ function hideAddFormError() {
   el.addFormError.classList.add('hidden');
 }
 
+function updatePriceAnnualHint() {
+  const value = parsePriceInput(el.addPrice.value);
+  if (value === null) {
+    el.addPriceAnnualHint.innerHTML = '&nbsp;';
+    return;
+  }
+  const annualCents = Math.round(value * 100) * 12;
+  const intPart = Math.floor(annualCents / 100).toLocaleString('fr-FR');
+  const centsPart = String(annualCents % 100).padStart(2, '0');
+  el.addPriceAnnualHint.textContent = `soit ${intPart},${centsPart} €/an`;
+}
+
+el.addPrice.addEventListener('input', updatePriceAnnualHint);
+
 function resetAddForm() {
   el.addForm.reset();
   addLogoBlob = null;
@@ -980,6 +1196,7 @@ function resetAddForm() {
   el.addLogoPreview.src = '';
   el.addLogoRemoveBtn.classList.add('hidden');
   updateLogoColorUI();
+  updatePriceAnnualHint();
   clearSelectedPaymentMethod();
   closePmForm();
   hideAddFormError();
@@ -1005,6 +1222,7 @@ function openEditModal(sub) {
 
   el.addName.value = sub.name;
   el.addPrice.value = Number(sub.monthly_price).toFixed(2);
+  updatePriceAnnualHint();
 
   if (sub.logo_path) {
     el.addLogoPreview.src = getPublicUrl(sub.logo_path);

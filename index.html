@@ -69,8 +69,12 @@
     <header class="page-header">
       <h1>Mes abos</h1>
       <div class="header-stats">
-        <span id="subscriptions-count">0 abonnement</span>
-        <span id="subscriptions-total" class="header-total">0,00&euro;/mois</span>
+        <span id="subscriptions-count" class="stats-count">0 abonnement</span>
+        <p id="subscriptions-total" class="stats-total"></p>
+        <div id="period-toggle" class="period-toggle" role="radiogroup" aria-label="P&eacute;riode d'affichage">
+          <button type="button" class="period-option active" data-period="month" role="radio" aria-checked="true">Mois</button>
+          <button type="button" class="period-option" data-period="year" role="radio" aria-checked="false">Ann&eacute;e</button>
+        </div>
       </div>
     </header>
 
@@ -117,14 +121,18 @@
 
         <label for="add-price">Prix mensuel</label>
         <input type="text" id="add-price" name="price" inputmode="decimal" placeholder="ex. 9,99" required>
+        <p id="add-price-annual-hint" class="field-hint">&nbsp;</p>
 
         <label for="pm-input">Moyen de paiement</label>
         <div class="tag-field">
           <div id="pm-chip" class="card-chip hidden">
-            <span id="pm-chip-icon" class="card-pill-icon"></span>
-            <span id="pm-chip-label"></span>
-            <button type="button" id="pm-chip-remove" aria-label="Retirer le moyen de paiement lié">&times;</button>
+            <button type="button" id="pm-chip-swatch" class="method-tag-trigger">
+              <span id="pm-chip-icon" class="method-tag-icon"></span>
+              <span id="pm-chip-label"></span>
+            </button>
+            <button type="button" id="pm-chip-remove" class="chip-remove-btn" aria-label="Retirer le moyen de paiement lié">&times;</button>
           </div>
+          <div id="pm-chip-palette" class="color-palette hidden" role="group" aria-label="Choisir une couleur"></div>
           <div id="pm-input-wrap">
             <input type="text" id="pm-input" autocomplete="off" placeholder="Rechercher ou créer un moyen de paiement">
             <ul id="pm-suggestions" class="suggestions hidden" role="listbox"></ul>
@@ -145,6 +153,9 @@
           </div>
           <input type="file" id="pm-form-icon-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
           <button type="button" id="pm-form-icon-remove" class="link-btn hidden">Retirer l'icône</button>
+
+          <label class="logo-color-label">Couleur</label>
+          <div id="pm-form-palette" class="color-palette" role="group" aria-label="Choisir une couleur"></div>
 
           <p id="pm-form-error" class="auth-error hidden" role="alert"></p>
 
