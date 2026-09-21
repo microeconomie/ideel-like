@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ideel-like</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app-loading" class="screen-center">
+  <p>Chargement…</p>
+</div>
+
+<div id="auth-screen" class="screen-center hidden">
+  <div class="auth-card">
+    <div class="brand">Ideel<span class="brand-dot">-like</span></div>
+
+    <div class="auth-tabs" role="tablist">
+      <button type="button" class="auth-tab active" data-tab="login" role="tab" aria-selected="true">Connexion</button>
+      <button type="button" class="auth-tab" data-tab="signup" role="tab" aria-selected="false">Inscription</button>
+    </div>
+
+    <p id="auth-error" class="auth-error hidden" role="alert"></p>
+
+    <form id="login-form" class="auth-form">
+      <label for="login-email">Adresse e-mail</label>
+      <input type="email" id="login-email" name="email" autocomplete="email" required>
+
+      <label for="login-password">Mot de passe</label>
+      <input type="password" id="login-password" name="password" autocomplete="current-password" required minlength="8">
+
+      <button type="submit" class="btn btn-primary">Se connecter</button>
+    </form>
+
+    <form id="signup-form" class="auth-form hidden">
+      <label for="signup-email">Adresse e-mail</label>
+      <input type="email" id="signup-email" name="email" autocomplete="email" required>
+
+      <label for="signup-password">Mot de passe</label>
+      <input type="password" id="signup-password" name="password" autocomplete="new-password" required minlength="8">
+      <p class="field-hint">8 caractères minimum</p>
+
+      <button type="submit" class="btn btn-primary">Créer mon compte</button>
+    </form>
+  </div>
+</div>
+
+<div id="app-shell" class="app-shell hidden">
+  <aside class="sidebar">
+    <div class="brand">Ideel<span class="brand-dot">-like</span></div>
+
+    <nav class="sidebar-nav">
+      <ul>
+        <li><a href="#" class="nav-item active" data-page="subscriptions">Mes abos</a></li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <p id="user-email" class="user-email"></p>
+      <button type="button" id="logout-btn" class="btn btn-ghost">Se déconnecter</button>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <header class="page-header">
+      <h1>Mes abos</h1>
+      <div class="header-stats">
+        <span id="subscriptions-count">0 abonnement</span>
+        <span id="subscriptions-total" class="header-total">0,00&euro;/mois</span>
+      </div>
+    </header>
+
+    <p id="global-error" class="global-error hidden" role="alert"></p>
+
+    <div id="subscriptions-placeholder" class="placeholder-note">
+      La liste des abonnements arrive à l'étape suivante.
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
