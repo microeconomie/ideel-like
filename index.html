@@ -76,10 +76,78 @@
 
     <p id="global-error" class="global-error hidden" role="alert"></p>
 
-    <div id="subscriptions-placeholder" class="placeholder-note">
-      La liste des abonnements arrive à l'étape suivante.
+    <p id="subscriptions-loading" class="placeholder-note">Chargement des abonnements…</p>
+
+    <div id="subscriptions-empty" class="empty-state hidden">
+      <p><strong>Aucun abonnement pour l'instant.</strong></p>
+      <p>Clique sur le bouton vert en bas à droite pour ajouter ton premier abonnement.</p>
     </div>
+
+    <div id="subscriptions-grid" class="subscriptions-grid"></div>
   </main>
+
+  <button type="button" id="add-fab" class="fab" aria-label="Ajouter un abonnement">+</button>
+
+  <div id="add-modal-overlay" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+      <div class="modal-header">
+        <h2 id="add-modal-title">Ajouter un abonnement</h2>
+        <button type="button" id="add-modal-close" class="modal-close" aria-label="Fermer">&times;</button>
+      </div>
+
+      <form id="add-form" class="auth-form" novalidate>
+        <label for="add-name">Nom de l'abonnement</label>
+        <input type="text" id="add-name" name="name" maxlength="60" required>
+
+        <label id="add-logo-label">Logo</label>
+        <div id="add-logo-dropzone" class="dropzone" tabindex="0" role="button" aria-labelledby="add-logo-label">
+          <img id="add-logo-preview" class="dropzone-preview hidden" alt="">
+          <p class="dropzone-text">Glisse une image ou clique pour parcourir</p>
+        </div>
+        <input type="file" id="add-logo-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
+
+        <label for="add-price">Prix mensuel</label>
+        <input type="text" id="add-price" name="price" inputmode="decimal" placeholder="ex. 9,99" required>
+
+        <label for="add-card-input">CB liée</label>
+        <div class="tag-field">
+          <div id="add-card-chip" class="card-chip hidden">
+            <span id="add-card-chip-icon" class="card-pill-icon"></span>
+            <span id="add-card-chip-label"></span>
+            <button type="button" id="add-card-chip-remove" aria-label="Retirer la CB liée">&times;</button>
+          </div>
+          <div id="add-card-input-wrap">
+            <input type="text" id="add-card-input" autocomplete="off" placeholder="Rechercher ou créer une CB">
+            <ul id="add-card-suggestions" class="suggestions hidden" role="listbox"></ul>
+          </div>
+        </div>
+
+        <div id="new-card-form" class="new-card-form hidden">
+          <label for="new-card-label">Libellé de la carte</label>
+          <input type="text" id="new-card-label" maxlength="40">
+          <p class="field-hint">Un libellé seulement (ex. Visa perso), jamais le numéro de carte</p>
+
+          <label id="new-card-icon-label">Icône de la banque (optionnelle)</label>
+          <div id="new-card-dropzone" class="dropzone dropzone-small" tabindex="0" role="button" aria-labelledby="new-card-icon-label">
+            <img id="new-card-icon-preview" class="dropzone-preview hidden" alt="">
+            <p class="dropzone-text">Glisse une icône ou clique pour parcourir</p>
+          </div>
+          <input type="file" id="new-card-icon-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="visually-hidden">
+
+          <p id="new-card-error" class="auth-error hidden" role="alert"></p>
+
+          <div class="new-card-actions">
+            <button type="button" id="new-card-confirm" class="btn btn-primary btn-sm">Ajouter cette CB</button>
+            <button type="button" id="new-card-cancel" class="btn btn-ghost btn-sm">Annuler</button>
+          </div>
+        </div>
+
+        <p id="add-form-error" class="auth-error hidden" role="alert"></p>
+
+        <button type="submit" id="add-submit-btn" class="btn btn-primary">Ajouter</button>
+      </form>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
