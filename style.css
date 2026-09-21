@@ -545,9 +545,10 @@ body {
   inset: 0;
   background: rgba(20, 30, 50, 0.4);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 20px;
+  padding: 5vh 20px 20px;
+  overflow-y: auto;
   z-index: 100;
 }
 

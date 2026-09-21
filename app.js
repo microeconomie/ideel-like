@@ -1139,12 +1139,13 @@ el.pmInput.addEventListener('keydown', (event) => {
       return;
     }
     quickCreatePaymentMethod(value);
-  } else if (event.key === 'Escape') {
+  } else if (event.key === 'Escape' && !el.pmSuggestions.classList.contains('hidden')) {
+    event.stopPropagation();
     el.pmSuggestions.classList.add('hidden');
   }
 });
 
-document.addEventListener('click', (event) => {
+document.addEventListener('mousedown', (event) => {
   if (event.target !== el.pmInput && !el.pmSuggestions.contains(event.target)) {
     el.pmSuggestions.classList.add('hidden');
   }
