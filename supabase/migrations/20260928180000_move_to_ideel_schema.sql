@@ -4,7 +4,6 @@
 --  * a subscription can only reference a payment method owned by the same user (composite FK)
 --  * functions have a fixed search_path
 
-begin;
 
 create schema if not exists ideel;
 
@@ -134,4 +133,3 @@ create policy "keepalive_public_read" on public.keepalive
 revoke all on public.keepalive from anon, authenticated;
 grant select on public.keepalive to anon;
 
-commit;
