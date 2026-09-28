@@ -1,7 +1,9 @@
-const SUPABASE_URL = 'https://kbrybzkdmcsokhfmnfzh.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImticnliemtkbWNzb2toZm1uZnpoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODE1OTgsImV4cCI6MjEwNTU1NzU5OH0.RFB_BhuogBMNaO4XvIKjveyTxjAPxhqcozOimEUw7uo';
+const SUPABASE_URL = 'https://rwsfkihoudtfobeiumrx.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3c2ZraWhvdWR0Zm9iZWl1bXJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3OTM2NzQsImV4cCI6MjA5MjM2OTY3NH0._psSFL4bQI8nIoWxb1D9Qpfj3eVq56yV-Z3xUB6s9B4';
+const STORAGE_BUCKET = 'ideel-images';
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ideel-like lives in the "ideel" schema of the shared aimeri-unique project
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: 'ideel' } });
 
 const DEFAULT_LOGO_BG = '#F5F6F8';
 
@@ -326,7 +328,7 @@ function h(tag, className, text) {
 }
 
 function getPublicUrl(path) {
-  return sb.storage.from('images').getPublicUrl(path).data.publicUrl;
+  return sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
 function isColorDark(hex) {
@@ -1188,7 +1190,7 @@ el.pmFormConfirm.addEventListener('click', async () => {
     if (pmIconBlob) {
       iconPath = `${state.session.user.id}/payment-methods/${crypto.randomUUID()}.${extForType(pmIconType)}`;
       const { error: uploadError } = await sb.storage
-        .from('images')
+        .from(STORAGE_BUCKET)
         .upload(iconPath, pmIconBlob, { contentType: pmIconType });
       if (uploadError) throw uploadError;
     } else if (pmIconRemoveFlag) {
@@ -1204,7 +1206,7 @@ el.pmFormConfirm.addEventListener('click', async () => {
     if (error) throw error;
 
     if (previousIconPath && previousIconPath !== iconPath) {
-      await sb.storage.from('images').remove([previousIconPath]).catch(() => {});
+      await sb.storage.from(STORAGE_BUCKET).remove([previousIconPath]).catch(() => {});
     }
 
     const idx = state.paymentMethods.findIndex((m) => m.id === data.id);
@@ -1257,7 +1259,7 @@ async function deletePaymentMethod(method) {
     const { error } = await sb.from('payment_methods').delete().eq('id', method.id);
     if (error) throw error;
     if (method.icon_path) {
-      await sb.storage.from('images').remove([method.icon_path]).catch(() => {});
+      await sb.storage.from(STORAGE_BUCKET).remove([method.icon_path]).catch(() => {});
     }
     state.paymentMethods = state.paymentMethods.filter((m) => m.id !== method.id);
     state.subscriptions = state.subscriptions.map((s) =>
@@ -1426,7 +1428,7 @@ el.addForm.addEventListener('submit', async (event) => {
     if (addLogoBlob) {
       logoPath = `${state.session.user.id}/logos/${crypto.randomUUID()}.${extForType(addLogoType)}`;
       const { error: uploadError } = await sb.storage
-        .from('images')
+        .from(STORAGE_BUCKET)
         .upload(logoPath, addLogoBlob, { contentType: addLogoType });
       if (uploadError) throw uploadError;
     } else if (removeLogoFlag) {
@@ -1452,7 +1454,7 @@ el.addForm.addEventListener('submit', async (event) => {
       if (error) throw error;
       saved = data;
       if (previousLogoPath && previousLogoPath !== logoPath) {
-        await sb.storage.from('images').remove([previousLogoPath]).catch(() => {});
+        await sb.storage.from(STORAGE_BUCKET).remove([previousLogoPath]).catch(() => {});
       }
       const idx = state.subscriptions.findIndex((s) => s.id === saved.id);
       state.subscriptions[idx] = saved;
@@ -1496,7 +1498,7 @@ el.deleteConfirmBtn.addEventListener('click', async () => {
     const { error } = await sb.from('subscriptions').delete().eq('id', editingSubscription.id);
     if (error) throw error;
     if (editingSubscription.logo_path) {
-      await sb.storage.from('images').remove([editingSubscription.logo_path]).catch(() => {});
+      await sb.storage.from(STORAGE_BUCKET).remove([editingSubscription.logo_path]).catch(() => {});
     }
     state.subscriptions = state.subscriptions.filter((s) => s.id !== editingSubscription.id);
     renderAll();
