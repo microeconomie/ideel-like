@@ -1254,6 +1254,70 @@ body {
   padding: 0 4px;
 }
 
+.save-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-green);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.save-check svg {
+  width: 14px;
+  height: 14px;
+}
+
+.save-check.is-visible {
+  animation: saveCheck 1.6s ease-out;
+}
+
+@keyframes saveCheck {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.budget-input.just-saved {
+  animation: fieldSaved 1.2s ease-out;
+}
+
+@keyframes fieldSaved {
+  0% {
+    background-color: var(--color-green-light);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-check.is-visible {
+    animation-name: saveCheckFade;
+  }
+
+  @keyframes saveCheckFade {
+    0%,
+    70% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
 .budget-empty-hint {
   margin: 0;
   font-size: 13px;

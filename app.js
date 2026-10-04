@@ -36,6 +36,8 @@ const PENCIL_SVG =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.5 1.5a1.5 1.5 0 0 1 2.12 0l.88.88a1.5 1.5 0 0 1 0 2.12l-8 8-3.5 1 1-3.5 8-8Z"/></svg>';
 const TRASH_SVG =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2h4a1 1 0 0 1 1 1v1h3v1.5H2V4h3V3a1 1 0 0 1 1-1Zm-2 4h8l-.6 8.2a1 1 0 0 1-1 .8H5.6a1 1 0 0 1-1-.8L4 6Z"/></svg>';
+const CHECK_SVG =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
 const GRIP_SVG =
   '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor" aria-hidden="true">' +
   '<circle cx="2" cy="2" r="1.4"/><circle cx="8" cy="2" r="1.4"/>' +
@@ -1664,7 +1666,34 @@ function flushSave(key) {
   queueWrite(pending.id, async () => {
     const { error } = await sb.from(pending.table).update(pending.patch).eq('id', pending.id);
     if (error) throw error;
+    flashSaved(pending.table, pending.id, Object.keys(pending.patch));
   });
+}
+
+function restartAnimation(node, className) {
+  if (!node) return;
+  node.classList.remove(className);
+  void node.offsetWidth;
+  node.classList.add(className);
+}
+
+// Discreet confirmation once the server has accepted an autosave: a check that fades out,
+// and a brief tint on the saved field(s)
+function flashSaved(table, id, fields) {
+  const container =
+    table === 'budget_entries'
+      ? bel.panel.querySelector(`.budget-row[data-id="${id}"]`)
+      : bel.panel.querySelector(`.budget-card[data-category-id="${id}"] .budget-card-header`);
+  if (!container) return;
+  restartAnimation(container.querySelector('.save-check'), 'is-visible');
+  fields.forEach((field) => restartAnimation(container.querySelector(`[data-field="${field}"]`), 'just-saved'));
+}
+
+function createSaveCheck() {
+  const check = h('span', 'save-check');
+  check.innerHTML = CHECK_SVG;
+  check.title = 'Enregistré';
+  return check;
 }
 
 function flushSavesFor(table, id) {
@@ -1886,6 +1915,7 @@ function createCategoryCard(category) {
   name.className = 'budget-input budget-cat-name';
   name.value = category.name;
   name.maxLength = 60;
+  name.dataset.field = 'name';
   name.setAttribute('aria-label', 'Nom de la catégorie');
   name.addEventListener('input', () => {
     const value = name.value.trim();
@@ -1909,6 +1939,7 @@ function createCategoryCard(category) {
     }
   });
   header.appendChild(name);
+  header.appendChild(createSaveCheck());
   header.appendChild(createTotalEl(category.id));
 
   const deleteBtn = document.createElement('button');
@@ -1964,6 +1995,7 @@ function createEntryRow(entry) {
   label.value = entry.label;
   label.maxLength = 80;
   label.placeholder = isIncome ? 'ex. Salaire' : 'Libellé';
+  label.dataset.field = 'label';
   label.setAttribute('aria-label', 'Libellé');
   label.addEventListener('input', () => {
     entry.label = label.value;
@@ -1989,6 +2021,7 @@ function createEntryRow(entry) {
   amount.className = 'budget-input budget-row-amount';
   amount.value = formatAmountInput(toCents(entry.monthly_amount));
   amount.placeholder = '0';
+  amount.dataset.field = 'monthly_amount';
   amount.setAttribute('aria-label', 'Montant mensuel en euros');
   amount.addEventListener('input', () => {
     const cents = parseAmountInput(amount.value);
@@ -2016,6 +2049,7 @@ function createEntryRow(entry) {
   amountField.appendChild(amount);
   amountField.appendChild(h('span', 'budget-euro', '€'));
   row.appendChild(amountField);
+  row.appendChild(createSaveCheck());
 
   const deleteBtn = document.createElement('button');
   deleteBtn.type = 'button';
