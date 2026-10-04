@@ -272,6 +272,7 @@ async function loadData() {
     state.subscriptions = subsRes.data;
     el.subscriptionsLoading.classList.add('hidden');
     renderAll();
+    if (currentPage === 'budgets') renderBudgetPage();
   } catch (error) {
     el.subscriptionsLoading.classList.add('hidden');
     showGlobalError(friendlyErrorMessage(error));
@@ -1545,7 +1546,13 @@ function applyRoute() {
   el.pageBudgets.classList.toggle('hidden', currentPage !== 'budgets');
   el.addFab.classList.toggle('hidden', currentPage !== 'abos');
   document.title = currentPage === 'budgets' ? 'Mes budgets · Ideel-like' : 'Ideel-like';
-  if (currentPage === 'budgets' && state.session) loadBudget();
+  if (currentPage === 'budgets' && state.session) {
+    if (budget.status === 'ready' && budget.userId === state.session.user.id) {
+      renderBudgetPage();
+    } else {
+      loadBudget();
+    }
+  }
 }
 
 window.addEventListener('hashchange', applyRoute);
@@ -1553,6 +1560,7 @@ window.addEventListener('hashchange', applyRoute);
 // Budgets: data & saving ------------------------------------------------------
 
 const BUDGET_KINDS = ['income', 'investment', 'expense'];
+const NBSP = '\xa0';
 const BUDGET_SAVE_DELAY = 600;
 const MAX_AMOUNT_CENTS = 9999999999; // numeric(10,2)
 
@@ -1570,6 +1578,7 @@ const bel = {
   content: document.getElementById('budget-content'),
   tabs: document.querySelectorAll('.budget-tab'),
   panel: document.getElementById('budget-panel'),
+  summary: document.getElementById('budget-summary'),
 };
 
 function loadBudgetKindPref() {
@@ -1637,14 +1646,18 @@ async function loadBudget(force = false) {
 // waitFor lists other rows whose pending writes must land first (e.g. a new entry's category).
 const writeChains = new Map();
 const pendingSaves = new Map();
+let budgetWritesInFlight = 0;
 
 function queueWrite(id, task, waitFor = []) {
+  budgetWritesInFlight += 1;
   const previous = Promise.all(
     [id, ...waitFor].map((key) => (writeChains.get(key) || Promise.resolve()).catch(() => {}))
   );
   const next = previous.then(task);
   writeChains.set(id, next);
-  return next.catch(onBudgetWriteError);
+  return next.catch(onBudgetWriteError).finally(() => {
+    budgetWritesInFlight -= 1;
+  });
 }
 
 function onBudgetWriteError() {
@@ -1715,6 +1728,14 @@ function flushAllSaves() {
 }
 
 window.addEventListener('pagehide', flushAllSaves);
+// leaving or reloading while writes are still queued would lose them: ask first
+window.addEventListener('beforeunload', (event) => {
+  flushAllSaves();
+  if (budgetWritesInFlight > 0) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushAllSaves();
 });
@@ -1764,13 +1785,37 @@ function nextPosition(items) {
   return items.length ? Math.max(...items.map((item) => item.position)) + 1 : 0;
 }
 
+function subscriptionsTotalCents() {
+  return state.subscriptions.reduce((sum, sub) => sum + toCents(sub.monthly_price), 0);
+}
+
+// "Abonnements" mirrors ideel.subscriptions; other categories sum their entries
 function categoryTotalCents(categoryId) {
+  const category = budget.categories.find((c) => c.id === categoryId);
+  if (category && category.is_auto_subscriptions) return subscriptionsTotalCents();
   return entriesOf(categoryId).reduce((sum, e) => sum + toCents(e.monthly_amount), 0);
 }
 
-// fr-FR groups digits with a narrow no-break space (U+202F), missing from Poppins
-const NBSP = '\xa0';
+// A disabled "Abonnements" category counts for nothing (only that category can be disabled)
+function kindTotalCents(kind) {
+  return categoriesOfKind(kind)
+    .filter((c) => c.is_enabled)
+    .reduce((sum, c) => sum + categoryTotalCents(c.id), 0);
+}
 
+function budgetTotals() {
+  const income = kindTotalCents('income');
+  const investment = kindTotalCents('investment');
+  const expense = kindTotalCents('expense');
+  return { income, investment, expense, available: income - expense - investment };
+}
+
+function formatPercent(ratio) {
+  // typographic minus sign rather than a hyphen
+  return `${Math.round(ratio * 100).toLocaleString('fr-FR').replace('-', '−')}${NBSP}%`;
+}
+
+// fr-FR groups digits with a narrow no-break space (U+202F), missing from Poppins
 function formatEuros(cents) {
   return `${Math.round(cents / 100).toLocaleString('fr-FR').replace(/\s/g, NBSP)}${NBSP}€`;
 }
@@ -1810,6 +1855,58 @@ function onBudgetChanged() {
   bel.panel.querySelectorAll('.budget-cat-total').forEach((node) => {
     node.textContent = formatEuros(categoryTotalCents(node.dataset.categoryId));
   });
+  renderBudgetSummary();
+}
+
+function strong(text, className) {
+  return h('strong', className ? `summary-value ${className}` : 'summary-value', text);
+}
+
+function renderBudgetSummary() {
+  const totals = budgetTotals();
+  const parts = [];
+  const text = (t) => parts.push(document.createTextNode(t));
+  bel.summary.innerHTML = '';
+
+  if (!totals.income && !totals.investment && !totals.expense) {
+    bel.summary.appendChild(
+      h(
+        'p',
+        'budget-summary-empty',
+        'Saisis tes revenus, tes investissements et tes dépenses : ta synthèse mensuelle apparaîtra ici.'
+      )
+    );
+    return;
+  }
+
+  // percentages make no sense without incomes: dashes instead
+  const dash = '–';
+  const rate = totals.income ? formatPercent(totals.investment / totals.income) : dash;
+  const possible = totals.income ? formatPercent((totals.investment + totals.available) / totals.income) : dash;
+
+  text('Ton taux d’épargne est de ');
+  parts.push(strong(rate));
+  text(' (taux d’épargne possible : ');
+  parts.push(strong(possible));
+  text('). Tu as un revenu total de ');
+  parts.push(strong(formatEuros(totals.income)));
+  text(', des dépenses de ');
+  parts.push(strong(formatEuros(totals.expense)));
+  text(' et tu investis ');
+  parts.push(strong(formatEuros(totals.investment)));
+  if (totals.available < 0) {
+    text(' tous les mois, il te manque ');
+    parts.push(strong(formatEuros(-totals.available), 'summary-negative'));
+    text(' chaque mois.');
+  } else {
+    text(' tous les mois, il te reste ');
+    parts.push(strong(formatEuros(totals.available), totals.available > 0 ? 'summary-positive' : ''));
+    text(' disponible.');
+  }
+
+  const p = h('p', 'budget-summary-text');
+  parts.forEach((part) => p.appendChild(part));
+  bel.summary.appendChild(p);
 }
 
 // Budgets: rendering ----------------------------------------------------------
@@ -1820,6 +1917,7 @@ function renderBudgetPage() {
   if (budget.status !== 'ready') return;
   renderBudgetTabs();
   renderBudgetPanel();
+  renderBudgetSummary();
 }
 
 function renderBudgetTabs() {
@@ -1859,9 +1957,8 @@ function renderBudgetPanel() {
     return;
   }
 
-  // the "Abonnements" category gets its own card later; it holds no manual entries
-  const categories = categoriesOfKind(budget.kind).filter((c) => !c.is_auto_subscriptions);
-  if (categories.length === 0) {
+  const categories = categoriesOfKind(budget.kind);
+  if (!categories.some((c) => !c.is_auto_subscriptions)) {
     bel.panel.appendChild(
       h(
         'p',
@@ -1872,7 +1969,11 @@ function renderBudgetPanel() {
       )
     );
   }
-  categories.forEach((category) => bel.panel.appendChild(createCategoryCard(category)));
+  categories.forEach((category) => {
+    bel.panel.appendChild(
+      category.is_auto_subscriptions ? createAutoSubscriptionsCard(category) : createCategoryCard(category)
+    );
+  });
 
   const addCategory = h('button', 'budget-add budget-add-category', '+ Ajouter une catégorie');
   addCategory.type = 'button';
@@ -1965,6 +2066,69 @@ function createCategoryCard(category) {
     createRowsBlock(category, category.kind === 'investment' ? '+ Ajouter un investissement' : '+ Ajouter une dépense')
   );
   return card;
+}
+
+// Read-only mirror of "Mes abos"; the switch excludes it from the expenses and the chart
+function createAutoSubscriptionsCard(category) {
+  const card = h('section', 'budget-card budget-card--auto');
+  card.dataset.categoryId = category.id;
+  card.classList.toggle('is-disabled', !category.is_enabled);
+
+  const header = h('header', 'budget-card-header');
+  header.appendChild(h('h2', 'budget-card-title', category.name));
+  header.appendChild(createSaveCheck());
+  header.appendChild(createTotalEl(category.id));
+
+  const toggle = h('label', 'switch');
+  toggle.title = 'Compter les abonnements dans les dépenses';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.setAttribute('role', 'switch');
+  input.checked = category.is_enabled;
+  input.setAttribute('aria-label', 'Compter les abonnements dans les dépenses');
+  input.addEventListener('change', () => {
+    category.is_enabled = input.checked;
+    card.classList.toggle('is-disabled', !category.is_enabled);
+    note.replaceWith((note = createAutoNote(category)));
+    scheduleSave('budget_categories', category.id, { is_enabled: category.is_enabled });
+    flushSavesFor('budget_categories', category.id);
+    onBudgetChanged();
+  });
+  toggle.appendChild(input);
+  toggle.appendChild(h('span', 'switch-track'));
+  header.appendChild(toggle);
+  card.appendChild(header);
+
+  let note = createAutoNote(category);
+  card.appendChild(note);
+
+  const rows = h('div', 'budget-rows');
+  if (state.subscriptions.length === 0) {
+    rows.appendChild(h('p', 'budget-auto-empty', 'Aucun abonnement dans Mes abos pour l’instant.'));
+  }
+  state.subscriptions.forEach((sub) => {
+    const row = h('div', 'budget-row budget-row--readonly');
+    row.appendChild(h('span', 'budget-readonly budget-row-label', sub.name));
+    const amountField = h('span', 'budget-amount-field');
+    amountField.appendChild(h('span', 'budget-readonly budget-row-amount', formatAmountInput(toCents(sub.monthly_price)) || '0'));
+    amountField.appendChild(h('span', 'budget-euro', '€'));
+    row.appendChild(amountField);
+    // keeps the amounts aligned with the editable rows (check + trash columns)
+    row.appendChild(h('span', 'budget-row-spacer'));
+    rows.appendChild(row);
+  });
+  card.appendChild(rows);
+  return card;
+}
+
+function createAutoNote(category) {
+  const note = h('p', 'budget-auto-note');
+  note.appendChild(document.createTextNode(category.is_enabled ? 'Synchronisé avec ' : 'Non comptés dans tes dépenses · synchronisés avec '));
+  const link = document.createElement('a');
+  link.href = '#abos';
+  link.textContent = 'Mes abos';
+  note.appendChild(link);
+  return note;
 }
 
 function toggleCategoryConfirm(card, category, open) {

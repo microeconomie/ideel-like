@@ -1347,6 +1347,144 @@ body {
   background: var(--color-white);
 }
 
+/* Budgets: "Abonnements" mirror category */
+
+.budget-auto-note {
+  margin: -4px 0 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.budget-auto-note a {
+  color: var(--color-green);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.budget-auto-note a:hover {
+  text-decoration: underline;
+}
+
+.budget-readonly {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  padding: 7px 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-readonly.budget-row-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-row-spacer {
+  width: 48px;
+  flex-shrink: 0;
+}
+
+.budget-auto-empty {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.budget-card--auto.is-disabled .budget-rows,
+.budget-card--auto.is-disabled .budget-cat-total {
+  opacity: 0.45;
+}
+
+.budget-card--auto.is-disabled .budget-cat-total {
+  text-decoration: line-through;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-left: 4px;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.switch-track {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: #CDD4DE;
+  position: relative;
+  transition: background-color 0.15s;
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-white);
+  box-shadow: 0 1px 3px rgba(20, 30, 50, 0.25);
+  transition: transform 0.15s;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--color-green);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+}
+
+/* Budgets: summary sentence */
+
+.budget-summary {
+  margin-top: 28px;
+  padding: 18px 8px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.budget-summary p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--color-text);
+}
+
+.budget-summary .budget-summary-empty {
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.summary-value {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.summary-positive {
+  color: #5E9A1E;
+}
+
+.summary-negative {
+  color: var(--color-danger);
+}
+
 @media (max-width: 600px) {
   .budget-card {
     padding: 14px;
@@ -1356,8 +1494,28 @@ body {
     width: 84px;
   }
 
+  .budget-summary p {
+    font-size: 14px;
+    text-align: left;
+  }
+
   .budget-tab {
     padding: 8px 14px;
+  }
+}
+
+@media (max-width: 400px) {
+  .budget-tabs {
+    gap: 2px;
+  }
+
+  .budget-tab {
+    font-size: 13px;
+    padding: 7px 10px;
+  }
+
+  .nav-icon {
+    display: none;
   }
 }
 
