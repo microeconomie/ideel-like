@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=budgets-4b">
+<link rel="stylesheet" href="style.css?v=budgets-5">
 </head>
 <body>
 
@@ -121,22 +121,22 @@
 
         <div id="budget-content" class="budget-content hidden">
           <div class="budget-narrow">
-          <div class="budget-tabs" role="tablist" aria-label="Rubriques du budget">
-            <button type="button" class="budget-tab" id="budget-tab-income" data-kind="income" role="tab" aria-controls="budget-panel">Revenus</button>
-            <button type="button" class="budget-tab" id="budget-tab-investment" data-kind="investment" role="tab" aria-controls="budget-panel">Investissements</button>
-            <button type="button" class="budget-tab" id="budget-tab-expense" data-kind="expense" role="tab" aria-controls="budget-panel">Dépenses</button>
-          </div>
-
-          <div id="budget-panel" class="budget-panel" role="tabpanel"></div>
-
-          <div id="budget-summary" class="budget-summary"></div>
+            <div id="budget-summary" class="budget-summary"></div>
           </div>
 
           <section id="budget-chart" class="budget-chart" aria-labelledby="budget-chart-title">
-            <h2 id="budget-chart-title" class="budget-chart-title">Flux mensuels</h2>
+            <div class="budget-chart-header">
+              <h2 id="budget-chart-title" class="budget-chart-title">Flux mensuels</h2>
+              <button type="button" id="budget-settings-btn" class="budget-settings-btn" aria-label="Paramètres du budget" title="Paramètres du budget">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+            </div>
             <p class="budget-chart-hint">Fais défiler le diagramme vers la droite →</p>
-            <p id="budget-chart-empty" class="budget-chart-empty">Ton diagramme des flux apparaîtra ici dès que tu auras saisi des montants.</p>
-            <div id="budget-chart-scroll" class="budget-chart-scroll hidden">
+            <div id="budget-chart-empty" class="budget-chart-empty">
+              <p id="budget-chart-empty-text">Saisis tes revenus, tes investissements et tes dépenses dans les paramètres du budget : ta synthèse et ton diagramme des flux apparaîtront ici.</p>
+              <button type="button" id="budget-empty-settings-btn" class="btn btn-primary">Ouvrir les paramètres</button>
+            </div>
+            <div id="budget-chart-scroll" class="budget-chart-scroll hidden" tabindex="0" role="region" aria-label="Diagramme des flux, défilable">
               <div id="budget-chart-canvas" class="budget-chart-canvas"></div>
               <div id="budget-chart-tooltip" class="budget-chart-tooltip hidden" role="status"></div>
             </div>
@@ -150,6 +150,27 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <button type="button" id="add-fab" class="fab" aria-label="Ajouter un abonnement">+</button>
+
+  <div id="budget-modal-overlay" class="modal-overlay budget-modal-overlay hidden">
+    <div class="modal budget-modal" role="dialog" aria-modal="true" aria-labelledby="budget-modal-title">
+      <div class="modal-header">
+        <h2 id="budget-modal-title">Paramètres du budget</h2>
+        <button type="button" id="budget-modal-close" class="modal-close" aria-label="Fermer">&times;</button>
+      </div>
+
+      <div class="budget-tabs" role="tablist" aria-label="Rubriques du budget">
+        <button type="button" class="budget-tab" id="budget-tab-income" data-kind="income" role="tab" aria-controls="budget-panel">Revenus</button>
+        <button type="button" class="budget-tab" id="budget-tab-investment" data-kind="investment" role="tab" aria-controls="budget-panel">Investissements</button>
+        <button type="button" class="budget-tab" id="budget-tab-expense" data-kind="expense" role="tab" aria-controls="budget-panel">Dépenses</button>
+      </div>
+
+      <div class="budget-modal-body">
+        <div id="budget-panel" class="budget-panel" role="tabpanel"></div>
+      </div>
+
+      <div id="budget-announcer" class="visually-hidden" role="status" aria-live="assertive"></div>
+    </div>
+  </div>
 
   <div id="add-modal-overlay" class="modal-overlay hidden">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
@@ -241,6 +262,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=budgets-4b"></script>
+<script src="app.js?v=budgets-5"></script>
 </body>
 </html>

@@ -1532,6 +1532,7 @@ function pageFromHash() {
 }
 
 function applyRoute() {
+  commitKeyboardDrag();
   currentPage = pageFromHash();
   el.navItems.forEach((item) => {
     const active = item.dataset.page === currentPage;
@@ -1545,6 +1546,8 @@ function applyRoute() {
   el.pageAbos.classList.toggle('hidden', currentPage !== 'abos');
   el.pageBudgets.classList.toggle('hidden', currentPage !== 'budgets');
   el.addFab.classList.toggle('hidden', currentPage !== 'abos');
+  document.documentElement.classList.toggle('is-budgets-page', currentPage === 'budgets');
+  if (currentPage !== 'budgets') closeBudgetModal();
   document.title = currentPage === 'budgets' ? 'Mes budgets · Ideel-like' : 'Ideel-like';
   if (currentPage === 'budgets' && state.session) {
     if (budget.status === 'ready' && budget.userId === state.session.user.id) {
@@ -1619,6 +1622,7 @@ function resetBudget() {
   pendingSaves.forEach((pending) => clearTimeout(pending.timer));
   pendingSaves.clear();
   writeChains.clear();
+  bel.modalOverlay.classList.add('hidden');
   budget.status = 'idle';
   budget.userId = null;
   budget.categories = [];
@@ -1866,8 +1870,13 @@ function showActionToast(message, actionLabel, onAction) {
   toastTimer = setTimeout(() => el.toast.classList.add('hidden'), 6000);
 }
 
-// Totals, synthesis and chart are refreshed on every change, without re-rendering the inputs
+// Totals, synthesis and chart are refreshed on every change, without re-rendering the inputs;
+// while a line or a category is being dragged, they wait for the drop
 function onBudgetChanged() {
+  if (budgetDrag.active) {
+    budgetDrag.changePending = true;
+    return;
+  }
   bel.panel.querySelectorAll('.budget-cat-total').forEach((node) => {
     node.textContent = formatEuros(categoryTotalCents(node.dataset.categoryId));
   });
@@ -1885,16 +1894,9 @@ function renderBudgetSummary() {
   const text = (t) => parts.push(document.createTextNode(t));
   bel.summary.innerHTML = '';
 
-  if (!totals.income && !totals.investment && !totals.expense) {
-    bel.summary.appendChild(
-      h(
-        'p',
-        'budget-summary-empty',
-        'Saisis tes revenus, tes investissements et tes dépenses : ta synthèse mensuelle apparaîtra ici.'
-      )
-    );
-    return;
-  }
+  const empty = !totals.income && !totals.investment && !totals.expense;
+  bel.summary.classList.toggle('hidden', empty);
+  if (empty) return;
 
   // percentages make no sense without incomes: dashes instead
   const dash = '–';
@@ -1949,6 +1951,7 @@ function renderBudgetTabs() {
 }
 
 function selectBudgetKind(kind, focusTab = false) {
+  commitKeyboardDrag();
   budget.kind = kind;
   saveBudgetKindPref(kind);
   renderBudgetTabs();
@@ -1968,10 +1971,17 @@ bel.tabs.forEach((tab) => {
 });
 
 function renderBudgetPanel() {
+  // never rebuild the DOM under a pointer drag; done on drop instead
+  if (budgetDrag.pointer) {
+    budgetDrag.renderPending = true;
+    return;
+  }
+  destroyBudgetSortables();
   bel.panel.innerHTML = '';
   if (budget.kind === 'income') {
     const income = categoriesOfKind('income')[0];
     if (income) bel.panel.appendChild(createIncomeCard(income));
+    createRowSortables();
     return;
   }
 
@@ -1987,16 +1997,21 @@ function renderBudgetPanel() {
       )
     );
   }
+  const cards = h('div', 'budget-cards');
   categories.forEach((category) => {
-    bel.panel.appendChild(
+    cards.appendChild(
       category.is_auto_subscriptions ? createAutoSubscriptionsCard(category) : createCategoryCard(category)
     );
   });
+  bel.panel.appendChild(cards);
 
   const addCategory = h('button', 'budget-add budget-add-category', '+ Ajouter une catégorie');
   addCategory.type = 'button';
   addCategory.addEventListener('click', () => addBudgetCategory(budget.kind));
   bel.panel.appendChild(addCategory);
+
+  createRowSortables();
+  createCategorySortable(cards);
 }
 
 function createTotalEl(categoryId) {
@@ -2007,7 +2022,7 @@ function createTotalEl(categoryId) {
 
 function createRowsBlock(category, addLabel) {
   const fragment = document.createDocumentFragment();
-  const rows = h('div', 'budget-rows');
+  const rows = h('div', 'budget-rows is-sortable');
   rows.dataset.categoryId = category.id;
   entriesOf(category.id).forEach((entry) => rows.appendChild(createEntryRow(entry)));
   fragment.appendChild(rows);
@@ -2036,6 +2051,7 @@ function createCategoryCard(category) {
   card.dataset.categoryId = category.id;
 
   const header = h('header', 'budget-card-header');
+  header.appendChild(createCategoryHandle(category));
   const name = document.createElement('input');
   name.type = 'text';
   name.className = 'budget-input budget-cat-name';
@@ -2093,6 +2109,7 @@ function createAutoSubscriptionsCard(category) {
   card.classList.toggle('is-disabled', !category.is_enabled);
 
   const header = h('header', 'budget-card-header');
+  header.appendChild(createCategoryHandle(category));
   header.appendChild(h('h2', 'budget-card-title', category.name));
   header.appendChild(createSaveCheck());
   header.appendChild(createTotalEl(category.id));
@@ -2144,6 +2161,8 @@ function createAutoSubscriptionsCard(category) {
   }
   state.subscriptions.forEach((sub) => {
     const row = h('div', 'budget-row budget-row--readonly');
+    // its lines can't be dragged: an empty slot keeps them aligned with the others
+    row.appendChild(h('span', 'budget-handle-spacer'));
     row.appendChild(h('span', 'budget-readonly budget-row-label', sub.name));
     const amountField = h('span', 'budget-amount-field');
     amountField.appendChild(h('span', 'budget-readonly budget-row-amount', formatAmountInput(toCents(sub.monthly_price)) || '0'));
@@ -2197,6 +2216,14 @@ function createEntryRow(entry) {
   const row = h('div', 'budget-row');
   row.dataset.id = entry.id;
   const isIncome = budget.categories.some((c) => c.id === entry.category_id && c.kind === 'income');
+
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'drag-handle budget-handle budget-row-handle';
+  handle.setAttribute('aria-label', `Déplacer ${entry.label || 'la ligne'}`);
+  handle.innerHTML = GRIP_SVG;
+  handle.addEventListener('keydown', (event) => onBudgetHandleKeydown(event, 'entry', entry.id));
+  row.appendChild(handle);
 
   const label = document.createElement('input');
   label.type = 'text';
@@ -2351,6 +2378,345 @@ function deleteBudgetCategory(category) {
   focusInPanel('.budget-add-category');
 }
 
+// Budgets: drag & drop -----------------------------------------------------------
+
+// pointer: a Sortable drag is in progress (the panel DOM must not be rebuilt)
+// active: any drag, pointer or keyboard (summary and chart wait for the drop)
+const budgetDrag = { pointer: false, active: false, changePending: false, renderPending: false };
+let budgetSortables = [];
+let kbBudgetDrag = null;
+
+const BUDGET_SORTABLE_OPTIONS = {
+  animation: 150,
+  forceFallback: true,
+  fallbackTolerance: 3,
+  scroll: true,
+  scrollSensitivity: 80,
+  scrollSpeed: 15,
+};
+
+function destroyBudgetSortables() {
+  budgetSortables.forEach((sortable) => sortable.destroy());
+  budgetSortables = [];
+}
+
+function startPointerDrag(type) {
+  budgetDrag.pointer = true;
+  budgetDrag.active = true;
+  bel.panel.classList.add(type === 'entry' ? 'is-dragging-row' : 'is-dragging-card');
+}
+
+function endPointerDrag(changed) {
+  budgetDrag.pointer = false;
+  budgetDrag.active = false;
+  budgetDrag.lastEnd = Date.now();
+  bel.panel.classList.remove('is-dragging-row', 'is-dragging-card');
+  const recompute = changed || budgetDrag.changePending;
+  const rerender = changed || budgetDrag.renderPending;
+  budgetDrag.changePending = false;
+  budgetDrag.renderPending = false;
+  // let Sortable finish its own cleanup before the panel is rebuilt
+  setTimeout(() => {
+    if (rerender) renderBudgetPanel();
+    if (recompute) onBudgetChanged();
+  }, 0);
+}
+
+// Lines move within their category or to another category of the same kind; the read-only
+// "Abonnements" list is not a Sortable, so nothing can be dropped into it nor taken out.
+function createRowSortables() {
+  if (!window.Sortable) return;
+  bel.panel.querySelectorAll('.budget-rows.is-sortable').forEach((container) => {
+    budgetSortables.push(
+      Sortable.create(container, {
+        ...BUDGET_SORTABLE_OPTIONS,
+        group: `budget-entries-${budget.kind}`,
+        handle: '.budget-row-handle',
+        draggable: '.budget-row',
+        ghostClass: 'budget-row--ghost',
+        chosenClass: 'budget-row--dragging',
+        onStart: () => startPointerDrag('entry'),
+        onEnd: onRowDrop,
+      })
+    );
+  });
+}
+
+function createCategorySortable(cards) {
+  if (!window.Sortable) return;
+  budgetSortables.push(
+    Sortable.create(cards, {
+      ...BUDGET_SORTABLE_OPTIONS,
+      handle: '.budget-cat-handle',
+      draggable: '.budget-card',
+      ghostClass: 'budget-card--ghost',
+      chosenClass: 'budget-card--dragging',
+      onStart: () => startPointerDrag('category'),
+      onEnd: (evt) => {
+        const changed = evt.oldIndex !== evt.newIndex;
+        if (changed) {
+          const ids = Array.from(cards.children).map((card) => card.dataset.categoryId);
+          ids.forEach((id, index) => {
+            budget.categories.find((c) => c.id === id).position = index;
+          });
+          persistCategoryOrder(ids);
+        }
+        endPointerDrag(changed);
+      },
+    })
+  );
+}
+
+function onRowDrop(evt) {
+  const fromId = evt.from.dataset.categoryId;
+  const toId = evt.to.dataset.categoryId;
+  const changed = fromId !== toId || evt.oldIndex !== evt.newIndex;
+  if (changed) {
+    [evt.from, evt.to].forEach((container) => {
+      container.querySelectorAll('.budget-row').forEach((row, index) => {
+        const entry = budget.entries.find((e) => e.id === row.dataset.id);
+        entry.category_id = container.dataset.categoryId;
+        entry.position = index;
+      });
+    });
+    persistEntryOrder(fromId === toId ? [toId] : [toId, fromId]);
+  }
+  endPointerDrag(changed);
+}
+
+// All order writes go through one chain (a line moved twice can't land in the wrong
+// category), each after the pending writes of the rows it lists (e.g. a brand new line).
+function persistEntryOrder(categoryIds) {
+  categoryIds.forEach((categoryId) => {
+    const ids = entriesOf(categoryId).map((e) => e.id);
+    queueWrite(
+      'order',
+      async () => {
+        const { error } = await sb.rpc('reorder_budget_entries', {
+          target_category_id: categoryId,
+          ordered_ids: ids,
+        });
+        if (error) throw error;
+      },
+      [categoryId, ...ids]
+    );
+  });
+}
+
+function persistCategoryOrder(ids) {
+  queueWrite(
+    'order',
+    async () => {
+      const { error } = await sb.rpc('reorder_budget_categories', { ordered_ids: ids });
+      if (error) throw error;
+    },
+    ids
+  );
+}
+
+function createCategoryHandle(category) {
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'drag-handle budget-handle budget-cat-handle';
+  handle.setAttribute('aria-label', `Déplacer la catégorie ${category.name}`);
+  handle.innerHTML = GRIP_SVG;
+  handle.addEventListener('keydown', (event) => onBudgetHandleKeydown(event, 'category', category.id));
+  return handle;
+}
+
+// Keyboard: Space/Enter to grab, arrows to move, Space/Enter to drop, Escape to cancel.
+// A line moved past the top or the bottom of its category goes on to the neighbouring one.
+
+function budgetAnnounce(message) {
+  const announcer = document.getElementById('budget-announcer');
+  announcer.textContent = '';
+  requestAnimationFrame(() => {
+    announcer.textContent = message;
+  });
+}
+
+function reindex(list) {
+  list.forEach((item, index) => {
+    item.position = index;
+  });
+}
+
+function categoryOf(categoryId) {
+  return budget.categories.find((c) => c.id === categoryId);
+}
+
+function entryName(entry) {
+  return entry.label.trim() || 'Ligne sans libellé';
+}
+
+function describeEntryPosition(entry) {
+  const list = entriesOf(entry.category_id);
+  const category = categoryOf(entry.category_id);
+  return `Position ${list.indexOf(entry) + 1} sur ${list.length} dans « ${category.name} ».`;
+}
+
+function describeCategoryPosition(category) {
+  const list = categoriesOfKind(category.kind);
+  return `Position ${list.indexOf(category) + 1} sur ${list.length}.`;
+}
+
+function moveEntryByKeyboard(entry, delta) {
+  const list = entriesOf(entry.category_id);
+  const index = list.indexOf(entry);
+  const target = index + delta;
+  if (target >= 0 && target < list.length) {
+    list.splice(index, 1);
+    list.splice(target, 0, entry);
+    reindex(list);
+    return true;
+  }
+  const kind = categoryOf(entry.category_id).kind;
+  const categories = categoriesOfKind(kind).filter((c) => !c.is_auto_subscriptions);
+  const next = categories[categories.findIndex((c) => c.id === entry.category_id) + delta];
+  if (!next) return false;
+  list.splice(index, 1);
+  reindex(list);
+  const nextList = entriesOf(next.id);
+  entry.category_id = next.id;
+  if (delta < 0) {
+    nextList.push(entry);
+  } else {
+    nextList.unshift(entry);
+  }
+  reindex(nextList);
+  return true;
+}
+
+function moveCategoryByKeyboard(category, delta) {
+  const list = categoriesOfKind(category.kind);
+  const index = list.indexOf(category);
+  const target = index + delta;
+  if (target < 0 || target >= list.length) return false;
+  list.splice(index, 1);
+  list.splice(target, 0, category);
+  reindex(list);
+  return true;
+}
+
+function focusGrabbedHandle() {
+  if (!kbBudgetDrag) return;
+  const selector =
+    kbBudgetDrag.type === 'entry'
+      ? `.budget-row[data-id="${kbBudgetDrag.id}"] .budget-row-handle`
+      : `.budget-card[data-category-id="${kbBudgetDrag.id}"] .budget-cat-handle`;
+  const handle = bel.panel.querySelector(selector);
+  if (!handle) return;
+  handle.classList.add('is-grabbed');
+  handle.focus();
+}
+
+function snapshotOrder() {
+  return {
+    entries: budget.entries.map((e) => [e, e.category_id, e.position]),
+    categories: budget.categories.map((c) => [c, c.position]),
+  };
+}
+
+function restoreOrder(snapshot) {
+  snapshot.entries.forEach(([e, categoryId, position]) => {
+    e.category_id = categoryId;
+    e.position = position;
+  });
+  snapshot.categories.forEach(([c, position]) => {
+    c.position = position;
+  });
+}
+
+function onBudgetHandleKeydown(event, type, id) {
+  const isActivate = event.key === ' ' || event.key === 'Spacebar' || event.key === 'Enter';
+
+  if (!kbBudgetDrag) {
+    if (!isActivate) return;
+    event.preventDefault();
+    const item = type === 'entry' ? budget.entries.find((e) => e.id === id) : categoryOf(id);
+    kbBudgetDrag = { type, id, from: type === 'entry' ? item.category_id : null, snapshot: snapshotOrder() };
+    budgetDrag.active = true;
+    event.currentTarget.classList.add('is-grabbed');
+    const name = type === 'entry' ? entryName(item) : item.name;
+    budgetAnnounce(
+      `${name} saisi. ${type === 'entry' ? describeEntryPosition(item) : describeCategoryPosition(item)} ` +
+        'Flèches pour déplacer, Espace pour déposer, Échap pour annuler.'
+    );
+    return;
+  }
+  if (kbBudgetDrag.id !== id) return;
+
+  if (isActivate) {
+    event.preventDefault();
+    commitKeyboardDrag(true);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    const { snapshot } = kbBudgetDrag;
+    restoreOrder(snapshot);
+    finishKeyboardDrag(id, type, false, true);
+    budgetAnnounce('Déplacement annulé.');
+  } else if (['ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(event.key)) {
+    event.preventDefault();
+    const delta = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1;
+    if (type === 'entry') {
+      const entry = budget.entries.find((e) => e.id === id);
+      if (!moveEntryByKeyboard(entry, delta)) return;
+      renderBudgetPanel();
+      focusGrabbedHandle();
+      budgetAnnounce(describeEntryPosition(entry));
+    } else {
+      const category = categoryOf(id);
+      if (!moveCategoryByKeyboard(category, delta)) return;
+      renderBudgetPanel();
+      focusGrabbedHandle();
+      budgetAnnounce(describeCategoryPosition(category));
+    }
+  }
+}
+
+// Drops a keyboard drag in place (Space, or leaving the panel, a tab or the page)
+function commitKeyboardDrag(announceDrop = false) {
+  if (!kbBudgetDrag) return;
+  const { type, id, from, snapshot } = kbBudgetDrag;
+  const changed =
+    snapshot.entries.some(([e, categoryId, position]) => e.category_id !== categoryId || e.position !== position) ||
+    snapshot.categories.some(([c, position]) => c.position !== position);
+  if (changed && type === 'entry') {
+    const entry = budget.entries.find((e) => e.id === id);
+    persistEntryOrder(entry.category_id === from ? [from] : [entry.category_id, from]);
+  } else if (changed) {
+    persistCategoryOrder(categoriesOfKind(categoryOf(id).kind).map((c) => c.id));
+  }
+  if (announceDrop) {
+    const item = type === 'entry' ? budget.entries.find((e) => e.id === id) : categoryOf(id);
+    budgetAnnounce(
+      `${type === 'entry' ? entryName(item) : item.name} déposé. ` +
+        (type === 'entry' ? describeEntryPosition(item) : describeCategoryPosition(item))
+    );
+  }
+  finishKeyboardDrag(id, type, changed, announceDrop);
+}
+
+function finishKeyboardDrag(id, type, changed, refocus) {
+  kbBudgetDrag = null;
+  budgetDrag.active = false;
+  const recompute = changed || budgetDrag.changePending;
+  budgetDrag.changePending = false;
+  renderBudgetPanel();
+  if (recompute) onBudgetChanged();
+  const selector =
+    type === 'entry'
+      ? `.budget-row[data-id="${id}"] .budget-row-handle`
+      : `.budget-card[data-category-id="${id}"] .budget-cat-handle`;
+  const handle = bel.panel.querySelector(selector);
+  if (refocus && handle) handle.focus();
+}
+
+// a click anywhere else drops the line or category where it is
+document.addEventListener('pointerdown', (event) => {
+  if (kbBudgetDrag && !event.target.closest('.budget-handle')) commitKeyboardDrag();
+});
+
 // Budgets: Sankey chart ---------------------------------------------------------
 
 // Loaded on the first visit of "Mes budgets" only, so "Mes abos" doesn't pay for them
@@ -2379,11 +2745,19 @@ const CHART_MIN_WIDTH = 760;
 const PILL_HEIGHT = 22;
 const PILL_PADDING_X = 8;
 const LABEL_MAX_CHARS = 26;
-const CHART_EMPTY_TEXT = 'Ton diagramme des flux apparaîtra ici dès que tu auras saisi des montants.';
+const CHART_EMPTY_TEXT =
+  'Saisis tes revenus, tes investissements et tes dépenses dans les paramètres du budget : ' +
+  'ta synthèse et ton diagramme des flux apparaîtront ici.';
 
 Object.assign(bel, {
   chart: document.getElementById('budget-chart'),
   chartEmpty: document.getElementById('budget-chart-empty'),
+  chartEmptyText: document.getElementById('budget-chart-empty-text'),
+  chartEmptyBtn: document.getElementById('budget-empty-settings-btn'),
+  settingsBtn: document.getElementById('budget-settings-btn'),
+  modalOverlay: document.getElementById('budget-modal-overlay'),
+  modal: document.querySelector('#budget-modal-overlay .modal'),
+  modalClose: document.getElementById('budget-modal-close'),
   chartScroll: document.getElementById('budget-chart-scroll'),
   chartCanvas: document.getElementById('budget-chart-canvas'),
   chartTooltip: document.getElementById('budget-chart-tooltip'),
@@ -2520,7 +2894,8 @@ async function renderBudgetChart() {
   if (budget.status !== 'ready' || currentPage !== 'budgets') return;
   const data = buildSankeyData();
   const hasData = data.links.some((l) => l.value > 0);
-  bel.chartEmpty.textContent = CHART_EMPTY_TEXT;
+  bel.chartEmptyText.textContent = CHART_EMPTY_TEXT;
+  bel.chartEmptyBtn.classList.remove('hidden');
   bel.chartEmpty.classList.toggle('hidden', hasData);
   bel.chartScroll.classList.toggle('hidden', !hasData);
   hideChartTooltip();
@@ -2533,7 +2908,8 @@ async function renderBudgetChart() {
   try {
     await loadD3();
   } catch (error) {
-    bel.chartEmpty.textContent = 'Impossible de charger le diagramme, réessaie un peu plus tard.';
+    bel.chartEmptyText.textContent = 'Impossible de charger le diagramme, réessaie un peu plus tard.';
+    bel.chartEmptyBtn.classList.add('hidden');
     bel.chartEmpty.classList.remove('hidden');
     bel.chartScroll.classList.add('hidden');
     return;
@@ -2569,7 +2945,9 @@ function drawSankey({ nodes, links, totals }) {
     .sankey()
     .nodeId((d) => d.id)
     .nodeAlign(d3.sankeyLeft)
+    // nodes and links keep the order of the panels (input order), no automatic sorting
     .nodeSort(null)
+    .linkSort(null)
     .nodeWidth(10)
     .nodePadding(nodePadding)
     .extent([
@@ -2709,6 +3087,53 @@ function drawSankey({ nodes, links, totals }) {
   bel.chartCanvas.appendChild(svg.node());
   bel.chart.classList.toggle('is-scrollable', bel.chartScroll.scrollWidth > bel.chartScroll.clientWidth + 1);
 }
+
+// Budgets: settings modal -----------------------------------------------------------
+
+const toastHome = { parent: el.toast.parentNode, next: el.toast.nextSibling };
+let budgetOverlayPointerDown = false;
+
+function openBudgetModal() {
+  if (budget.status !== 'ready') return;
+  renderBudgetTabs();
+  renderBudgetPanel();
+  // the undo toast must stay reachable from inside the dialog
+  bel.modal.appendChild(el.toast);
+  openModal(bel.modalOverlay, bel.modal);
+}
+
+function closeBudgetModal() {
+  if (bel.modalOverlay.classList.contains('hidden')) return;
+  commitKeyboardDrag();
+  if (bel.modal.contains(document.activeElement)) document.activeElement.blur();
+  flushAllSaves();
+  toastHome.parent.insertBefore(el.toast, toastHome.next);
+  closeModalGeneric(bel.modalOverlay);
+}
+
+bel.settingsBtn.addEventListener('click', openBudgetModal);
+bel.chartEmptyBtn.addEventListener('click', openBudgetModal);
+bel.modalClose.addEventListener('click', closeBudgetModal);
+
+bel.modalOverlay.addEventListener('keydown', (event) => {
+  if (event.key === 'Tab') trapTabKey(bel.modal, event);
+});
+
+// only a click that starts and ends on the backdrop closes it (not the end of a drag
+// or of a text selection that wandered outside the dialog)
+bel.modalOverlay.addEventListener('pointerdown', (event) => {
+  budgetOverlayPointerDown = event.target === bel.modalOverlay;
+});
+bel.modalOverlay.addEventListener('click', (event) => {
+  if (event.target === bel.modalOverlay && budgetOverlayPointerDown) closeBudgetModal();
+});
+
+// fields and keyboard drags handle their own Escape first (preventDefault)
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !event.defaultPrevented && !bel.modalOverlay.classList.contains('hidden')) {
+    closeBudgetModal();
+  }
+});
 
 function showChartTooltip(text, event, x, y) {
   const box = bel.chartScroll.getBoundingClientRect();
