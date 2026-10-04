@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=budgets-3c">
+<link rel="stylesheet" href="style.css?v=budgets-4b">
 </head>
 <body>
 
@@ -120,6 +120,7 @@
         <p id="budget-loading" class="placeholder-note hidden">Chargement des budgets…</p>
 
         <div id="budget-content" class="budget-content hidden">
+          <div class="budget-narrow">
           <div class="budget-tabs" role="tablist" aria-label="Rubriques du budget">
             <button type="button" class="budget-tab" id="budget-tab-income" data-kind="income" role="tab" aria-controls="budget-panel">Revenus</button>
             <button type="button" class="budget-tab" id="budget-tab-investment" data-kind="investment" role="tab" aria-controls="budget-panel">Investissements</button>
@@ -129,6 +130,17 @@
           <div id="budget-panel" class="budget-panel" role="tabpanel"></div>
 
           <div id="budget-summary" class="budget-summary"></div>
+          </div>
+
+          <section id="budget-chart" class="budget-chart" aria-labelledby="budget-chart-title">
+            <h2 id="budget-chart-title" class="budget-chart-title">Flux mensuels</h2>
+            <p class="budget-chart-hint">Fais défiler le diagramme vers la droite →</p>
+            <p id="budget-chart-empty" class="budget-chart-empty">Ton diagramme des flux apparaîtra ici dès que tu auras saisi des montants.</p>
+            <div id="budget-chart-scroll" class="budget-chart-scroll hidden">
+              <div id="budget-chart-canvas" class="budget-chart-canvas"></div>
+              <div id="budget-chart-tooltip" class="budget-chart-tooltip hidden" role="status"></div>
+            </div>
+          </section>
         </div>
       </div>
     </section>
@@ -229,6 +241,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=budgets-3c"></script>
+<script src="app.js?v=budgets-4b"></script>
 </body>
 </html>

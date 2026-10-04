@@ -1006,8 +1006,14 @@ body {
 .page {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* a wide chart must scroll inside its card, not widen the page */
+.main-content {
+  min-width: 0;
 }
 
 .sidebar-nav li + li {
@@ -1056,9 +1062,12 @@ body {
 /* Budgets */
 
 .budget-content {
+  padding-bottom: 48px;
+}
+
+.budget-narrow {
   max-width: 760px;
   margin: 0 auto;
-  padding-bottom: 48px;
 }
 
 .budget-tabs {
@@ -1485,6 +1494,127 @@ body {
   color: var(--color-danger);
 }
 
+/* Budgets: "Abonnements" folded list */
+
+.budget-auto-details {
+  margin-top: 2px;
+}
+
+.budget-auto-toggle {
+  padding-top: 4px;
+}
+
+/* Budgets: Sankey chart */
+
+.budget-chart {
+  margin-top: 28px;
+  background: var(--color-white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px 20px 16px;
+}
+
+.budget-chart-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.budget-chart-hint {
+  display: none;
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.budget-chart.is-scrollable .budget-chart-hint {
+  display: block;
+}
+
+.budget-chart-empty {
+  margin: 0;
+  padding: 36px 12px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.budget-chart-scroll {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.budget-chart-canvas svg {
+  display: block;
+}
+
+.sankey {
+  font-family: 'Poppins', sans-serif;
+  font-size: 12px;
+}
+
+.sankey-link {
+  stroke-opacity: 0.5;
+  transition: stroke-opacity 0.15s;
+  cursor: pointer;
+  outline: none;
+}
+
+.sankey.has-highlight .sankey-link {
+  stroke-opacity: 0.12;
+}
+
+.sankey.has-highlight .sankey-link.is-active {
+  stroke-opacity: 0.85;
+}
+
+.sankey-node {
+  cursor: pointer;
+}
+
+.sankey-label {
+  transition: opacity 0.15s;
+}
+
+.sankey-label.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sankey-label.is-revealed {
+  opacity: 1;
+}
+
+.sankey-pill {
+  fill: var(--color-white);
+  stroke: var(--color-border);
+  filter: drop-shadow(0 1px 2px rgba(20, 30, 50, 0.08));
+}
+
+.sankey-label text {
+  fill: var(--color-text);
+  font-weight: 500;
+}
+
+.sankey-amount {
+  font-weight: 700;
+}
+
+.budget-chart-tooltip {
+  position: absolute;
+  z-index: 3;
+  max-width: 280px;
+  background: #2B2F36;
+  color: var(--color-white);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 7px 10px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
 @media (max-width: 600px) {
   .budget-card {
     padding: 14px;
@@ -1497,6 +1627,10 @@ body {
   .budget-summary p {
     font-size: 14px;
     text-align: left;
+  }
+
+  .budget-chart {
+    padding: 16px 12px 12px;
   }
 
   .budget-tab {

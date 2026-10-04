@@ -1581,6 +1581,22 @@ const bel = {
   summary: document.getElementById('budget-summary'),
 };
 
+function loadSubsListPref() {
+  try {
+    return localStorage.getItem('ideel-like:budget-subs-expanded') === '1';
+  } catch (error) {
+    return false;
+  }
+}
+
+function saveSubsListPref(expanded) {
+  try {
+    localStorage.setItem('ideel-like:budget-subs-expanded', expanded ? '1' : '0');
+  } catch (error) {
+    // ignore storage access errors
+  }
+}
+
 function loadBudgetKindPref() {
   try {
     const saved = localStorage.getItem('ideel-like:budget-kind');
@@ -1856,6 +1872,7 @@ function onBudgetChanged() {
     node.textContent = formatEuros(categoryTotalCents(node.dataset.categoryId));
   });
   renderBudgetSummary();
+  scheduleChartRender();
 }
 
 function strong(text, className) {
@@ -1918,6 +1935,7 @@ function renderBudgetPage() {
   renderBudgetTabs();
   renderBudgetPanel();
   renderBudgetSummary();
+  scheduleChartRender();
 }
 
 function renderBudgetTabs() {
@@ -2099,8 +2117,26 @@ function createAutoSubscriptionsCard(category) {
   header.appendChild(toggle);
   card.appendChild(header);
 
+  // the detailed list is folded by default; the choice is remembered in this browser
+  const details = h('div', 'budget-auto-details');
+  details.id = 'budget-auto-details';
+  const listToggle = h('button', 'budget-add budget-auto-toggle');
+  listToggle.type = 'button';
+  listToggle.setAttribute('aria-controls', details.id);
+  const applyExpanded = (expanded) => {
+    details.classList.toggle('hidden', !expanded);
+    listToggle.textContent = expanded ? 'Masquer la liste' : 'Voir la liste';
+    listToggle.setAttribute('aria-expanded', String(expanded));
+  };
+  listToggle.addEventListener('click', () => {
+    const expanded = details.classList.contains('hidden');
+    saveSubsListPref(expanded);
+    applyExpanded(expanded);
+  });
+  applyExpanded(loadSubsListPref());
+
   let note = createAutoNote(category);
-  card.appendChild(note);
+  details.appendChild(note);
 
   const rows = h('div', 'budget-rows');
   if (state.subscriptions.length === 0) {
@@ -2117,7 +2153,9 @@ function createAutoSubscriptionsCard(category) {
     row.appendChild(h('span', 'budget-row-spacer'));
     rows.appendChild(row);
   });
-  card.appendChild(rows);
+  details.appendChild(rows);
+  card.appendChild(details);
+  card.appendChild(listToggle);
   return card;
 }
 
@@ -2311,6 +2349,381 @@ function deleteBudgetCategory(category) {
   renderBudgetPanel();
   onBudgetChanged();
   focusInPanel('.budget-add-category');
+}
+
+// Budgets: Sankey chart ---------------------------------------------------------
+
+// Loaded on the first visit of "Mes budgets" only, so "Mes abos" doesn't pay for them
+const D3_SCRIPTS = [
+  {
+    src: 'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js',
+    integrity: 'sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==',
+  },
+  {
+    src: 'https://cdnjs.cloudflare.com/ajax/libs/d3-sankey/0.12.3/d3-sankey.min.js',
+    integrity: 'sha512-KK15oKpabNDaLpWinMtNfTqy/V7pzlc2FRG174PfASes7RRx6TAsua8HJdRTKo8+BLvPBKNIkL7kXWcz5HoqqA==',
+  },
+];
+
+const SANKEY_COLORS = {
+  income: '#A9CBEF',
+  budget: '#8DB8E8',
+  investment: '#C8B6EC',
+  available: '#D5DBE3',
+  deficit: '#F4B4B4',
+};
+// peach, pink, sea green, blue, lilac, then lighter variants
+const SANKEY_EXPENSE_COLORS = ['#FFCBA6', '#F7B8CF', '#A8E2CF', '#B7D3F4', '#E3C7F0', '#FFE0C2', '#FAD3E2', '#CBEFE3'];
+
+const CHART_MIN_WIDTH = 760;
+const PILL_HEIGHT = 22;
+const PILL_PADDING_X = 8;
+const LABEL_MAX_CHARS = 26;
+const CHART_EMPTY_TEXT = 'Ton diagramme des flux apparaîtra ici dès que tu auras saisi des montants.';
+
+Object.assign(bel, {
+  chart: document.getElementById('budget-chart'),
+  chartEmpty: document.getElementById('budget-chart-empty'),
+  chartScroll: document.getElementById('budget-chart-scroll'),
+  chartCanvas: document.getElementById('budget-chart-canvas'),
+  chartTooltip: document.getElementById('budget-chart-tooltip'),
+});
+
+let d3Promise = null;
+let chartFrame = null;
+let measureCtx = null;
+
+function loadScript({ src, integrity }) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.integrity = integrity;
+    script.crossOrigin = 'anonymous';
+    script.referrerPolicy = 'no-referrer';
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Échec du chargement de ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function loadD3() {
+  if (window.d3 && window.d3.sankey) return Promise.resolve();
+  if (!d3Promise) {
+    // d3-sankey's UMD build extends the global d3, so it must come second
+    d3Promise = D3_SCRIPTS.reduce((chain, script) => chain.then(() => loadScript(script)), Promise.resolve())
+      .then(() => document.fonts.ready)
+      .catch((error) => {
+        d3Promise = null;
+        throw error;
+      });
+  }
+  return d3Promise;
+}
+
+function scheduleChartRender() {
+  if (chartFrame) return;
+  chartFrame = requestAnimationFrame(() => {
+    chartFrame = null;
+    renderBudgetChart();
+  });
+}
+
+if (window.ResizeObserver) {
+  let lastWidth = 0;
+  new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (width && width !== lastWidth) {
+      lastWidth = width;
+      scheduleChartRender();
+    }
+  }).observe(bel.chart);
+}
+
+function positiveEntries(categoryId) {
+  return entriesOf(categoryId).filter((e) => toCents(e.monthly_amount) > 0);
+}
+
+// incomes → Budget → investments / expense categories / available → lines.
+// A disabled "Abonnements" category is left out, and when spending exceeds incomes an
+// "À financer" source makes up the difference so that the flows stay balanced.
+function buildSankeyData() {
+  const totals = budgetTotals();
+  const nodes = [];
+  const links = [];
+  const addNode = (id, label, amount, color, depth) => nodes.push({ id, label, amount, color, col: depth });
+  const addLink = (source, target, value) => links.push({ source, target, value });
+  const entryLabel = (e) => e.label.trim() || 'Sans libellé';
+
+  categoriesOfKind('income').forEach((category) => {
+    positiveEntries(category.id).forEach((e) => {
+      addNode(`e:${e.id}`, entryLabel(e), toCents(e.monthly_amount), SANKEY_COLORS.income, 0);
+      addLink(`e:${e.id}`, 'budget', toCents(e.monthly_amount));
+    });
+  });
+  if (totals.available < 0) {
+    addNode('deficit', 'À financer', -totals.available, SANKEY_COLORS.deficit, 0);
+    addLink('deficit', 'budget', -totals.available);
+  }
+  addNode('budget', 'Budget', totals.income, SANKEY_COLORS.budget, 1);
+
+  if (totals.investment > 0) {
+    addNode('investments', 'Investissements mensuels', totals.investment, SANKEY_COLORS.investment, 2);
+    addLink('budget', 'investments', totals.investment);
+    categoriesOfKind('investment').forEach((category) => {
+      positiveEntries(category.id).forEach((e) => {
+        addNode(`e:${e.id}`, entryLabel(e), toCents(e.monthly_amount), SANKEY_COLORS.investment, 3);
+        addLink('investments', `e:${e.id}`, toCents(e.monthly_amount));
+      });
+    });
+  }
+
+  categoriesOfKind('expense')
+    .filter((category) => category.is_enabled && categoryTotalCents(category.id) > 0)
+    .forEach((category, index) => {
+      const color = SANKEY_EXPENSE_COLORS[index % SANKEY_EXPENSE_COLORS.length];
+      addNode(`c:${category.id}`, category.name, categoryTotalCents(category.id), color, 2);
+      addLink('budget', `c:${category.id}`, categoryTotalCents(category.id));
+      // "Abonnements" stays a single flow
+      if (category.is_auto_subscriptions) return;
+      positiveEntries(category.id).forEach((e) => {
+        addNode(`e:${e.id}`, entryLabel(e), toCents(e.monthly_amount), color, 3);
+        addLink(`c:${category.id}`, `e:${e.id}`, toCents(e.monthly_amount));
+      });
+    });
+
+  if (totals.available > 0) {
+    addNode('available', 'Disponible', totals.available, SANKEY_COLORS.available, 2);
+    addLink('budget', 'available', totals.available);
+  }
+
+  return { nodes, links, totals };
+}
+
+function truncateLabel(text) {
+  return text.length > LABEL_MAX_CHARS ? `${text.slice(0, LABEL_MAX_CHARS - 1).trimEnd()}…` : text;
+}
+
+function measureText(text, weight) {
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  measureCtx.font = `${weight} 12px Poppins, sans-serif`;
+  return measureCtx.measureText(text).width;
+}
+
+function labelParts(node) {
+  const labelName = `${truncateLabel(node.label)} : `;
+  const labelAmount = formatEuros(node.amount);
+  const labelWidth = measureText(labelName, 500) + measureText(labelAmount, 700) + PILL_PADDING_X * 2;
+  return { labelName, labelAmount, labelWidth };
+}
+
+async function renderBudgetChart() {
+  if (budget.status !== 'ready' || currentPage !== 'budgets') return;
+  const data = buildSankeyData();
+  const hasData = data.links.some((l) => l.value > 0);
+  bel.chartEmpty.textContent = CHART_EMPTY_TEXT;
+  bel.chartEmpty.classList.toggle('hidden', hasData);
+  bel.chartScroll.classList.toggle('hidden', !hasData);
+  hideChartTooltip();
+  if (!hasData) {
+    bel.chart.classList.remove('is-scrollable');
+    bel.chartCanvas.innerHTML = '';
+    return;
+  }
+
+  try {
+    await loadD3();
+  } catch (error) {
+    bel.chartEmpty.textContent = 'Impossible de charger le diagramme, réessaie un peu plus tard.';
+    bel.chartEmpty.classList.remove('hidden');
+    bel.chartScroll.classList.add('hidden');
+    return;
+  }
+  if (budget.status !== 'ready' || currentPage !== 'budgets' || !bel.chartScroll.clientWidth) return;
+  // rebuilt: the data may have changed while d3 was loading
+  drawSankey(buildSankeyData());
+}
+
+function drawSankey({ nodes, links, totals }) {
+  const d3 = window.d3;
+  nodes.forEach((node) => Object.assign(node, labelParts(node)));
+
+  // Labels: first column on the left of its nodes, last column on the right, middle columns
+  // centred on theirs. Columns are spaced so that neighbouring labels never meet horizontally.
+  const lastCol = Math.max(...nodes.map((n) => n.col));
+  const maxWidth = (col) => Math.max(0, ...nodes.filter((n) => n.col === col).map((n) => n.labelWidth));
+  const half = (col) => (col === 0 || col === lastCol ? 0 : maxWidth(col) / 2);
+  let spacing = 150;
+  for (let col = 0; col < lastCol; col += 1) {
+    spacing = Math.max(spacing, half(col) + half(col + 1) + 24);
+  }
+  const left = maxWidth(0) + 10;
+  const right = maxWidth(lastCol) + 10;
+  const width = Math.max(CHART_MIN_WIDTH, bel.chartScroll.clientWidth, left + right + spacing * lastCol);
+  const maxPerColumn = Math.max(...d3.rollup(nodes, (v) => v.length, (n) => n.col).values());
+  // with a reasonable number of lines, spacing the nodes by a label's height shows every label;
+  // beyond that the chart stays compact and the thinnest flows' labels wait for a hover
+  const nodePadding = maxPerColumn <= 16 ? PILL_HEIGHT + 6 : 12;
+  const height = Math.max(260, maxPerColumn * (nodePadding + 10) + 140);
+
+  const graph = d3
+    .sankey()
+    .nodeId((d) => d.id)
+    .nodeAlign(d3.sankeyLeft)
+    .nodeSort(null)
+    .nodeWidth(10)
+    .nodePadding(nodePadding)
+    .extent([
+      [left, 10],
+      [width - right, height - 10],
+    ])({ nodes, links: links.map((l) => ({ ...l })) });
+
+  const percentOfIncome = (value) => (totals.income ? ` · ${formatPercent(value / totals.income)} des revenus` : '');
+  const linkColor = (l) => (l.target.id === 'budget' ? l.source.color : l.source.id === 'budget' ? l.target.color : l.source.color);
+  const linkText = (l) => `${l.source.label} → ${l.target.label} : ${formatEuros(l.value)}${percentOfIncome(l.value)}`;
+
+  const svg = d3
+    .create('svg')
+    .attr('class', 'sankey')
+    .attr('width', width)
+    .attr('height', height)
+    .attr('viewBox', `0 0 ${width} ${height}`)
+    .attr('role', 'img')
+    .attr(
+      'aria-label',
+      `Flux mensuels : ${formatEuros(totals.income)} de revenus, ${formatEuros(totals.expense)} de dépenses, ` +
+        `${formatEuros(totals.investment)} investis.`
+    );
+
+  const linkSel = svg
+    .append('g')
+    .attr('fill', 'none')
+    .selectAll('path')
+    .data(graph.links)
+    .join('path')
+    .attr('class', 'sankey-link')
+    .attr('d', d3.sankeyLinkHorizontal())
+    .attr('stroke', linkColor)
+    .attr('stroke-width', (l) => Math.max(1.5, l.width))
+    .attr('tabindex', 0)
+    .attr('aria-label', linkText);
+
+  const nodeSel = svg
+    .append('g')
+    .selectAll('rect')
+    .data(graph.nodes)
+    .join('rect')
+    .attr('class', 'sankey-node')
+    .attr('x', (n) => n.x0)
+    .attr('y', (n) => n.y0)
+    .attr('width', (n) => n.x1 - n.x0)
+    .attr('height', (n) => Math.max(1, n.y1 - n.y0))
+    .attr('rx', 2)
+    .attr('fill', (n) => d3.color(n.color).darker(0.4));
+
+  const labelSel = svg
+    .append('g')
+    .selectAll('g')
+    .data(graph.nodes)
+    .join('g')
+    .attr('class', 'sankey-label')
+    .attr('transform', (n) => {
+      const cy = (n.y0 + n.y1) / 2 - PILL_HEIGHT / 2;
+      if (n.depth === 0) return `translate(${n.x0 - 6 - n.labelWidth},${cy})`;
+      if (n.depth === lastCol) return `translate(${n.x1 + 6},${cy})`;
+      return `translate(${(n.x0 + n.x1) / 2 - n.labelWidth / 2},${cy})`;
+    });
+  labelSel
+    .append('rect')
+    .attr('class', 'sankey-pill')
+    .attr('width', (n) => n.labelWidth)
+    .attr('height', PILL_HEIGHT)
+    .attr('rx', PILL_HEIGHT / 2);
+  const text = labelSel
+    .append('text')
+    .attr('x', PILL_PADDING_X)
+    .attr('y', PILL_HEIGHT / 2)
+    .attr('dy', '0.35em');
+  text.append('tspan').text((n) => n.labelName);
+  text.append('tspan').attr('class', 'sankey-amount').text((n) => n.labelAmount);
+
+  // Vertical collisions, column by column: the biggest flows keep their label, the others
+  // only show on hover
+  d3.group(graph.nodes, (n) => n.depth).forEach((columnNodes) => {
+    const kept = [];
+    [...columnNodes]
+      .sort((a, b) => b.value - a.value)
+      .forEach((n) => {
+        const cy = (n.y0 + n.y1) / 2;
+        n.labelHidden = kept.some((y) => Math.abs(y - cy) < PILL_HEIGHT + 2);
+        if (!n.labelHidden) kept.push(cy);
+      });
+  });
+  labelSel.classed('is-hidden', (n) => n.labelHidden);
+
+  function highlight(activeLinks, activeNodes) {
+    svg.classed('has-highlight', true);
+    linkSel.classed('is-active', (l) => activeLinks.includes(l));
+    labelSel.classed('is-revealed', (n) => activeNodes.includes(n));
+    labelSel.filter((n) => activeNodes.includes(n)).raise();
+  }
+
+  function clear() {
+    svg.classed('has-highlight', false);
+    linkSel.classed('is-active', false);
+    labelSel.classed('is-revealed', false);
+    hideChartTooltip();
+  }
+
+  linkSel
+    .on('pointerenter', (event, l) => {
+      highlight([l], [l.source, l.target]);
+      showChartTooltip(linkText(l), event);
+    })
+    .on('pointermove', (event, l) => showChartTooltip(linkText(l), event))
+    .on('pointerleave', (event) => {
+      // a tap keeps the tooltip until the next tap elsewhere
+      if (event.pointerType !== 'touch') clear();
+    })
+    .on('focus', (event, l) => {
+      highlight([l], [l.source, l.target]);
+      showChartTooltip(linkText(l), null, (l.source.x1 + l.target.x0) / 2, (l.y0 + l.y1) / 2);
+    })
+    .on('blur', clear);
+
+  const nodeHover = (event, n) => {
+    const connected = [...n.sourceLinks, ...n.targetLinks];
+    highlight(connected, [n]);
+    showChartTooltip(`${n.label} : ${formatEuros(n.amount)}${percentOfIncome(n.amount)}`, event);
+  };
+  nodeSel.on('pointerenter', nodeHover).on('pointermove', nodeHover).on('pointerleave', (event) => {
+    if (event.pointerType !== 'touch') clear();
+  });
+  labelSel.on('pointerenter', nodeHover).on('pointerleave', (event) => {
+    if (event.pointerType !== 'touch') clear();
+  });
+  svg.on('pointerdown', (event) => {
+    if (event.target === svg.node()) clear();
+  });
+
+  bel.chartCanvas.innerHTML = '';
+  bel.chartCanvas.appendChild(svg.node());
+  bel.chart.classList.toggle('is-scrollable', bel.chartScroll.scrollWidth > bel.chartScroll.clientWidth + 1);
+}
+
+function showChartTooltip(text, event, x, y) {
+  const box = bel.chartScroll.getBoundingClientRect();
+  const px = event ? event.clientX - box.left + bel.chartScroll.scrollLeft : x;
+  const py = event ? event.clientY - box.top : y;
+  bel.chartTooltip.textContent = text;
+  bel.chartTooltip.classList.remove('hidden');
+  const tipWidth = bel.chartTooltip.offsetWidth;
+  const maxLeft = bel.chartScroll.scrollLeft + bel.chartScroll.clientWidth - tipWidth - 8;
+  bel.chartTooltip.style.left = `${Math.max(bel.chartScroll.scrollLeft + 8, Math.min(px + 14, maxLeft))}px`;
+  bel.chartTooltip.style.top = `${Math.max(4, py + 14)}px`;
+}
+
+function hideChartTooltip() {
+  bel.chartTooltip.classList.add('hidden');
 }
 
 init();
