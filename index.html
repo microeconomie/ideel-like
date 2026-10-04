@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=ideel-schema">
+<link rel="stylesheet" href="style.css?v=budgets-2b">
 </head>
 <body>
 
@@ -61,7 +61,18 @@
 
     <nav class="sidebar-nav">
       <ul>
-        <li><a href="#" class="nav-item active" data-page="subscriptions">Mes abos</a></li>
+        <li>
+          <a href="#abos" class="nav-item active" data-page="abos">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18M7 15h4"/></svg>
+            <span>Mes abos</span>
+          </a>
+        </li>
+        <li>
+          <a href="#budgets" class="nav-item" data-page="budgets">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5v10z"/><path d="M14 3.2a8.5 8.5 0 0 1 6.8 6.8H14z"/></svg>
+            <span>Mes budgets</span>
+          </a>
+        </li>
       </ul>
     </nav>
 
@@ -72,6 +83,7 @@
   </aside>
 
   <main class="main-content">
+    <section id="page-abos" class="page">
     <header class="page-header">
       <h1>Mes abos</h1>
       <div class="header-stats">
@@ -96,6 +108,28 @@
 
       <div id="subscriptions-grid" class="subscriptions-grid"></div>
     </div>
+    </section>
+
+    <section id="page-budgets" class="page hidden">
+      <header class="page-header">
+        <h1>Mes budgets</h1>
+      </header>
+
+      <div class="main-scroll">
+        <p id="budget-error" class="global-error hidden" role="alert"></p>
+        <p id="budget-loading" class="placeholder-note hidden">Chargement des budgets…</p>
+
+        <div id="budget-content" class="budget-content hidden">
+          <div class="budget-tabs" role="tablist" aria-label="Rubriques du budget">
+            <button type="button" class="budget-tab" id="budget-tab-income" data-kind="income" role="tab" aria-controls="budget-panel">Revenus</button>
+            <button type="button" class="budget-tab" id="budget-tab-investment" data-kind="investment" role="tab" aria-controls="budget-panel">Investissements</button>
+            <button type="button" class="budget-tab" id="budget-tab-expense" data-kind="expense" role="tab" aria-controls="budget-panel">Dépenses</button>
+          </div>
+
+          <div id="budget-panel" class="budget-panel" role="tabpanel"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div id="dnd-announcer" class="visually-hidden" role="status" aria-live="assertive"></div>
@@ -193,6 +227,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=ideel-schema"></script>
+<script src="app.js?v=budgets-2b"></script>
 </body>
 </html>

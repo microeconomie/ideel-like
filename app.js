@@ -111,6 +111,10 @@ const el = {
   pmFormError: document.getElementById('pm-form-error'),
   pmFormConfirm: document.getElementById('pm-form-confirm'),
   pmFormCancel: document.getElementById('pm-form-cancel'),
+
+  navItems: document.querySelectorAll('.nav-item'),
+  pageAbos: document.getElementById('page-abos'),
+  pageBudgets: document.getElementById('page-budgets'),
 };
 
 const IMAGE_EXT_BY_TYPE = {
@@ -209,6 +213,7 @@ function showAuthScreen() {
   state.session = null;
   state.paymentMethods = [];
   state.subscriptions = [];
+  resetBudget();
 }
 
 function showAppShell(session) {
@@ -218,6 +223,7 @@ function showAppShell(session) {
   el.userEmail.textContent = session.user.email;
   state.session = session;
   loadData();
+  applyRoute();
 }
 
 async function init() {
@@ -1511,5 +1517,591 @@ el.deleteConfirmBtn.addEventListener('click', async () => {
     el.deleteConfirmBtn.disabled = false;
   }
 });
+
+// Navigation ----------------------------------------------------------------
+
+const PAGES = ['abos', 'budgets'];
+let currentPage = null;
+
+function pageFromHash() {
+  const page = location.hash.replace('#', '');
+  return PAGES.includes(page) ? page : 'abos';
+}
+
+function applyRoute() {
+  currentPage = pageFromHash();
+  el.navItems.forEach((item) => {
+    const active = item.dataset.page === currentPage;
+    item.classList.toggle('active', active);
+    if (active) {
+      item.setAttribute('aria-current', 'page');
+    } else {
+      item.removeAttribute('aria-current');
+    }
+  });
+  el.pageAbos.classList.toggle('hidden', currentPage !== 'abos');
+  el.pageBudgets.classList.toggle('hidden', currentPage !== 'budgets');
+  el.addFab.classList.toggle('hidden', currentPage !== 'abos');
+  document.title = currentPage === 'budgets' ? 'Mes budgets · Ideel-like' : 'Ideel-like';
+  if (currentPage === 'budgets' && state.session) loadBudget();
+}
+
+window.addEventListener('hashchange', applyRoute);
+
+// Budgets: data & saving ------------------------------------------------------
+
+const BUDGET_KINDS = ['income', 'investment', 'expense'];
+const BUDGET_SAVE_DELAY = 600;
+const MAX_AMOUNT_CENTS = 9999999999; // numeric(10,2)
+
+const budget = {
+  status: 'idle', // idle | loading | ready | error
+  userId: null,
+  categories: [],
+  entries: [],
+  kind: loadBudgetKindPref(),
+};
+
+const bel = {
+  error: document.getElementById('budget-error'),
+  loading: document.getElementById('budget-loading'),
+  content: document.getElementById('budget-content'),
+  tabs: document.querySelectorAll('.budget-tab'),
+  panel: document.getElementById('budget-panel'),
+};
+
+function loadBudgetKindPref() {
+  try {
+    const saved = localStorage.getItem('ideel-like:budget-kind');
+    if (BUDGET_KINDS.includes(saved)) return saved;
+  } catch (error) {
+    // ignore storage access errors
+  }
+  return 'income';
+}
+
+function saveBudgetKindPref(kind) {
+  try {
+    localStorage.setItem('ideel-like:budget-kind', kind);
+  } catch (error) {
+    // ignore storage access errors
+  }
+}
+
+function resetBudget() {
+  pendingSaves.forEach((pending) => clearTimeout(pending.timer));
+  pendingSaves.clear();
+  writeChains.clear();
+  budget.status = 'idle';
+  budget.userId = null;
+  budget.categories = [];
+  budget.entries = [];
+}
+
+async function loadBudget(force = false) {
+  const userId = state.session.user.id;
+  if (!force && budget.userId === userId && budget.status !== 'error') return;
+  budget.userId = userId;
+  budget.status = 'loading';
+  renderBudgetPage();
+
+  try {
+    // creates the implicit income category and the "Abonnements" category on first use
+    const { error: ensureError } = await sb.rpc('ensure_budget_defaults');
+    if (ensureError) throw ensureError;
+    const [catsRes, entriesRes] = await Promise.all([
+      sb.from('budget_categories').select('*').order('position', { ascending: true }),
+      sb.from('budget_entries').select('*').order('position', { ascending: true }),
+    ]);
+    if (catsRes.error) throw catsRes.error;
+    if (entriesRes.error) throw entriesRes.error;
+    if (budget.userId !== userId) return;
+
+    budget.categories = catsRes.data;
+    budget.entries = entriesRes.data;
+    budget.status = 'ready';
+    bel.error.classList.add('hidden');
+  } catch (error) {
+    if (budget.userId !== userId) return;
+    budget.status = 'error';
+    bel.error.textContent = friendlyErrorMessage(error);
+    bel.error.classList.remove('hidden');
+  }
+  renderBudgetPage();
+}
+
+// Writes on the same row run one after the other (insert, then edits, then delete), so a slow
+// request can't land after a newer one. Field edits are debounced and merged per row.
+const writeChains = new Map();
+const pendingSaves = new Map();
+
+function queueWrite(id, task) {
+  const previous = writeChains.get(id) || Promise.resolve();
+  const next = previous.catch(() => {}).then(task);
+  writeChains.set(id, next);
+  return next.catch(onBudgetWriteError);
+}
+
+function onBudgetWriteError() {
+  showToast("Impossible d'enregistrer la modification, budgets rechargés.");
+  if (state.session) loadBudget(true);
+}
+
+function scheduleSave(table, id, patch) {
+  const key = `${table}:${id}`;
+  const pending = pendingSaves.get(key) || { table, id, patch: {} };
+  Object.assign(pending.patch, patch);
+  clearTimeout(pending.timer);
+  pending.timer = setTimeout(() => flushSave(key), BUDGET_SAVE_DELAY);
+  pendingSaves.set(key, pending);
+}
+
+function flushSave(key) {
+  const pending = pendingSaves.get(key);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingSaves.delete(key);
+  queueWrite(pending.id, async () => {
+    const { error } = await sb.from(pending.table).update(pending.patch).eq('id', pending.id);
+    if (error) throw error;
+  });
+}
+
+function flushSavesFor(table, id) {
+  flushSave(`${table}:${id}`);
+}
+
+function dropPendingSave(table, id) {
+  const key = `${table}:${id}`;
+  const pending = pendingSaves.get(key);
+  if (pending) clearTimeout(pending.timer);
+  pendingSaves.delete(key);
+}
+
+function flushAllSaves() {
+  Array.from(pendingSaves.keys()).forEach(flushSave);
+}
+
+window.addEventListener('pagehide', flushAllSaves);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushAllSaves();
+});
+
+function insertBudgetEntry(entry) {
+  const row = {
+    id: entry.id,
+    category_id: entry.category_id,
+    label: entry.label,
+    monthly_amount: entry.monthly_amount,
+    position: entry.position,
+  };
+  queueWrite(entry.id, async () => {
+    const { error } = await sb.from('budget_entries').insert(row);
+    if (error) throw error;
+  });
+}
+
+function insertBudgetCategory(category) {
+  const row = {
+    id: category.id,
+    kind: category.kind,
+    name: category.name,
+    position: category.position,
+  };
+  queueWrite(category.id, async () => {
+    const { error } = await sb.from('budget_categories').insert(row);
+    if (error) throw error;
+  });
+}
+
+// Budgets: helpers -----------------------------------------------------------
+
+function categoriesOfKind(kind) {
+  return budget.categories.filter((c) => c.kind === kind).sort((a, b) => a.position - b.position);
+}
+
+function entriesOf(categoryId) {
+  return budget.entries.filter((e) => e.category_id === categoryId).sort((a, b) => a.position - b.position);
+}
+
+function nextPosition(items) {
+  return items.length ? Math.max(...items.map((item) => item.position)) + 1 : 0;
+}
+
+function categoryTotalCents(categoryId) {
+  return entriesOf(categoryId).reduce((sum, e) => sum + toCents(e.monthly_amount), 0);
+}
+
+// fr-FR groups digits with a narrow no-break space (U+202F), missing from Poppins
+const NBSP = '\xa0';
+
+function formatEuros(cents) {
+  return `${Math.round(cents / 100).toLocaleString('fr-FR').replace(/\s/g, NBSP)}${NBSP}€`;
+}
+
+function formatAmountInput(cents) {
+  if (!cents) return '';
+  return cents % 100 ? (cents / 100).toFixed(2).replace('.', ',') : String(cents / 100);
+}
+
+// Empty means 0; returns null when invalid (negative, more than 2 decimals, too large)
+function parseAmountInput(raw) {
+  const cleaned = raw.replace(/\s/g, '').replace(',', '.');
+  if (cleaned === '') return 0;
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  const cents = Math.round(Number(cleaned) * 100);
+  return cents > MAX_AMOUNT_CENTS ? null : cents;
+}
+
+function showActionToast(message, actionLabel, onAction) {
+  el.toast.textContent = '';
+  el.toast.appendChild(h('span', null, message));
+  const action = h('button', 'toast-action', actionLabel);
+  action.type = 'button';
+  action.addEventListener('click', () => {
+    clearTimeout(toastTimer);
+    el.toast.classList.add('hidden');
+    onAction();
+  });
+  el.toast.appendChild(action);
+  el.toast.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.toast.classList.add('hidden'), 6000);
+}
+
+// Totals, synthesis and chart are refreshed on every change, without re-rendering the inputs
+function onBudgetChanged() {
+  bel.panel.querySelectorAll('.budget-cat-total').forEach((node) => {
+    node.textContent = formatEuros(categoryTotalCents(node.dataset.categoryId));
+  });
+}
+
+// Budgets: rendering ----------------------------------------------------------
+
+function renderBudgetPage() {
+  bel.loading.classList.toggle('hidden', budget.status !== 'loading');
+  bel.content.classList.toggle('hidden', budget.status !== 'ready');
+  if (budget.status !== 'ready') return;
+  renderBudgetTabs();
+  renderBudgetPanel();
+}
+
+function renderBudgetTabs() {
+  bel.tabs.forEach((tab) => {
+    const active = tab.dataset.kind === budget.kind;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+    if (active) bel.panel.setAttribute('aria-labelledby', tab.id);
+  });
+}
+
+function selectBudgetKind(kind, focusTab = false) {
+  budget.kind = kind;
+  saveBudgetKindPref(kind);
+  renderBudgetTabs();
+  renderBudgetPanel();
+  if (focusTab) document.getElementById(`budget-tab-${kind}`).focus();
+}
+
+bel.tabs.forEach((tab) => {
+  tab.addEventListener('click', () => selectBudgetKind(tab.dataset.kind));
+  tab.addEventListener('keydown', (event) => {
+    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (!delta) return;
+    event.preventDefault();
+    const idx = BUDGET_KINDS.indexOf(budget.kind);
+    selectBudgetKind(BUDGET_KINDS[(idx + delta + BUDGET_KINDS.length) % BUDGET_KINDS.length], true);
+  });
+});
+
+function renderBudgetPanel() {
+  bel.panel.innerHTML = '';
+  if (budget.kind === 'income') {
+    const income = categoriesOfKind('income')[0];
+    if (income) bel.panel.appendChild(createIncomeCard(income));
+    return;
+  }
+
+  // the "Abonnements" category gets its own card later; it holds no manual entries
+  const categories = categoriesOfKind(budget.kind).filter((c) => !c.is_auto_subscriptions);
+  if (categories.length === 0) {
+    bel.panel.appendChild(
+      h(
+        'p',
+        'budget-empty-hint',
+        budget.kind === 'investment'
+          ? 'Crée ta première catégorie d’investissement, par exemple Bourse ou Épargne.'
+          : 'Crée ta première catégorie de dépenses, par exemple Logement ou Vie quotidienne.'
+      )
+    );
+  }
+  categories.forEach((category) => bel.panel.appendChild(createCategoryCard(category)));
+
+  const addCategory = h('button', 'budget-add budget-add-category', '+ Ajouter une catégorie');
+  addCategory.type = 'button';
+  addCategory.addEventListener('click', () => addBudgetCategory(budget.kind));
+  bel.panel.appendChild(addCategory);
+}
+
+function createTotalEl(categoryId) {
+  const total = h('span', 'budget-cat-total', formatEuros(categoryTotalCents(categoryId)));
+  total.dataset.categoryId = categoryId;
+  return total;
+}
+
+function createRowsBlock(category, addLabel) {
+  const fragment = document.createDocumentFragment();
+  const rows = h('div', 'budget-rows');
+  rows.dataset.categoryId = category.id;
+  entriesOf(category.id).forEach((entry) => rows.appendChild(createEntryRow(entry)));
+  fragment.appendChild(rows);
+
+  const add = h('button', 'budget-add', addLabel);
+  add.type = 'button';
+  add.dataset.addFor = category.id;
+  add.addEventListener('click', () => addBudgetEntry(category));
+  fragment.appendChild(add);
+  return fragment;
+}
+
+function createIncomeCard(category) {
+  const card = h('section', 'budget-card');
+  card.dataset.categoryId = category.id;
+  const header = h('header', 'budget-card-header');
+  header.appendChild(h('h2', 'budget-card-title', 'Sources de revenus'));
+  header.appendChild(createTotalEl(category.id));
+  card.appendChild(header);
+  card.appendChild(createRowsBlock(category, '+ Ajouter une source de revenu'));
+  return card;
+}
+
+function createCategoryCard(category) {
+  const card = h('section', 'budget-card');
+  card.dataset.categoryId = category.id;
+
+  const header = h('header', 'budget-card-header');
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.className = 'budget-input budget-cat-name';
+  name.value = category.name;
+  name.maxLength = 60;
+  name.setAttribute('aria-label', 'Nom de la catégorie');
+  name.addEventListener('input', () => {
+    const value = name.value.trim();
+    name.classList.toggle('is-invalid', !value);
+    name.setAttribute('aria-invalid', String(!value));
+    if (!value) return;
+    category.name = value;
+    scheduleSave('budget_categories', category.id, { name: value });
+    onBudgetChanged();
+  });
+  name.addEventListener('blur', () => {
+    name.value = category.name;
+    name.classList.remove('is-invalid');
+    name.removeAttribute('aria-invalid');
+    flushSavesFor('budget_categories', category.id);
+  });
+  name.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === 'Escape') {
+      event.preventDefault();
+      name.blur();
+    }
+  });
+  header.appendChild(name);
+  header.appendChild(createTotalEl(category.id));
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'row-delete';
+  deleteBtn.setAttribute('aria-label', `Supprimer la catégorie ${category.name}`);
+  deleteBtn.innerHTML = TRASH_SVG;
+  deleteBtn.addEventListener('click', () => toggleCategoryConfirm(card, category, true));
+  header.appendChild(deleteBtn);
+  card.appendChild(header);
+
+  const confirm = h('div', 'budget-confirm hidden');
+  card.appendChild(confirm);
+
+  card.appendChild(
+    createRowsBlock(category, category.kind === 'investment' ? '+ Ajouter un investissement' : '+ Ajouter une dépense')
+  );
+  return card;
+}
+
+function toggleCategoryConfirm(card, category, open) {
+  const confirm = card.querySelector('.budget-confirm');
+  confirm.innerHTML = '';
+  confirm.classList.toggle('hidden', !open);
+  if (!open) {
+    card.querySelector('.budget-card-header .row-delete').focus();
+    return;
+  }
+
+  const count = entriesOf(category.id).length;
+  const lines = count === 0 ? '(vide)' : `et ses ${count} ligne${count === 1 ? '' : 's'}`;
+  confirm.appendChild(h('p', null, `Supprimer « ${category.name} » ${lines} ?`));
+
+  const confirmBtn = h('button', 'btn btn-danger btn-sm', 'Supprimer');
+  confirmBtn.type = 'button';
+  confirmBtn.addEventListener('click', () => deleteBudgetCategory(category));
+  const cancelBtn = h('button', 'btn btn-ghost btn-sm', 'Annuler');
+  cancelBtn.type = 'button';
+  cancelBtn.addEventListener('click', () => toggleCategoryConfirm(card, category, false));
+  confirm.appendChild(confirmBtn);
+  confirm.appendChild(cancelBtn);
+  cancelBtn.focus();
+}
+
+function createEntryRow(entry) {
+  const row = h('div', 'budget-row');
+  row.dataset.id = entry.id;
+  const isIncome = budget.categories.some((c) => c.id === entry.category_id && c.kind === 'income');
+
+  const label = document.createElement('input');
+  label.type = 'text';
+  label.className = 'budget-input budget-row-label';
+  label.value = entry.label;
+  label.maxLength = 80;
+  label.placeholder = isIncome ? 'ex. Salaire' : 'Libellé';
+  label.setAttribute('aria-label', 'Libellé');
+  label.addEventListener('input', () => {
+    entry.label = label.value;
+    scheduleSave('budget_entries', entry.id, { label: entry.label });
+    onBudgetChanged();
+  });
+  label.addEventListener('blur', () => flushSavesFor('budget_entries', entry.id));
+  label.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      amount.focus();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      label.blur();
+    }
+  });
+  row.appendChild(label);
+
+  const amountField = h('span', 'budget-amount-field');
+  const amount = document.createElement('input');
+  amount.type = 'text';
+  amount.inputMode = 'decimal';
+  amount.className = 'budget-input budget-row-amount';
+  amount.value = formatAmountInput(toCents(entry.monthly_amount));
+  amount.placeholder = '0';
+  amount.setAttribute('aria-label', 'Montant mensuel en euros');
+  amount.addEventListener('input', () => {
+    const cents = parseAmountInput(amount.value);
+    const invalid = cents === null;
+    amount.classList.toggle('is-invalid', invalid);
+    amount.setAttribute('aria-invalid', String(invalid));
+    if (invalid) return;
+    entry.monthly_amount = cents / 100;
+    scheduleSave('budget_entries', entry.id, { monthly_amount: entry.monthly_amount });
+    onBudgetChanged();
+  });
+  amount.addEventListener('blur', () => {
+    // an invalid value is dropped and the last valid amount comes back
+    amount.value = formatAmountInput(toCents(entry.monthly_amount));
+    amount.classList.remove('is-invalid');
+    amount.removeAttribute('aria-invalid');
+    flushSavesFor('budget_entries', entry.id);
+  });
+  amount.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === 'Escape') {
+      event.preventDefault();
+      amount.blur();
+    }
+  });
+  amountField.appendChild(amount);
+  amountField.appendChild(h('span', 'budget-euro', '€'));
+  row.appendChild(amountField);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'row-delete';
+  deleteBtn.setAttribute('aria-label', `Supprimer ${entry.label || 'la ligne'}`);
+  deleteBtn.innerHTML = TRASH_SVG;
+  deleteBtn.addEventListener('click', () => deleteBudgetEntry(entry));
+  row.appendChild(deleteBtn);
+
+  return row;
+}
+
+// Budgets: actions --------------------------------------------------------------
+
+function focusInPanel(selector, select = false) {
+  const node = bel.panel.querySelector(selector);
+  if (!node) return;
+  node.focus();
+  if (select && node.select) node.select();
+}
+
+function addBudgetEntry(category) {
+  const entry = {
+    id: crypto.randomUUID(),
+    category_id: category.id,
+    label: '',
+    monthly_amount: 0,
+    position: nextPosition(entriesOf(category.id)),
+  };
+  budget.entries.push(entry);
+  insertBudgetEntry(entry);
+  renderBudgetPanel();
+  onBudgetChanged();
+  focusInPanel(`.budget-row[data-id="${entry.id}"] .budget-row-label`);
+}
+
+function addBudgetCategory(kind) {
+  const category = {
+    id: crypto.randomUUID(),
+    kind,
+    name: 'Nouvelle catégorie',
+    position: nextPosition(categoriesOfKind(kind)),
+    is_auto_subscriptions: false,
+    is_enabled: true,
+  };
+  budget.categories.push(category);
+  insertBudgetCategory(category);
+  renderBudgetPanel();
+  onBudgetChanged();
+  focusInPanel(`.budget-card[data-category-id="${category.id}"] .budget-cat-name`, true);
+}
+
+function deleteBudgetEntry(entry) {
+  dropPendingSave('budget_entries', entry.id);
+  budget.entries = budget.entries.filter((e) => e.id !== entry.id);
+  queueWrite(entry.id, async () => {
+    const { error } = await sb.from('budget_entries').delete().eq('id', entry.id);
+    if (error) throw error;
+  });
+  renderBudgetPanel();
+  onBudgetChanged();
+  focusInPanel(`[data-add-for="${entry.category_id}"]`);
+
+  showActionToast(`« ${entry.label || 'Ligne sans libellé'} » supprimée.`, 'Annuler', () => {
+    if (!budget.categories.some((c) => c.id === entry.category_id)) return;
+    budget.entries.push(entry);
+    insertBudgetEntry(entry);
+    renderBudgetPanel();
+    onBudgetChanged();
+  });
+}
+
+function deleteBudgetCategory(category) {
+  const entries = entriesOf(category.id);
+  entries.forEach((e) => dropPendingSave('budget_entries', e.id));
+  dropPendingSave('budget_categories', category.id);
+  budget.entries = budget.entries.filter((e) => e.category_id !== category.id);
+  budget.categories = budget.categories.filter((c) => c.id !== category.id);
+  // its entries go with it (on delete cascade)
+  queueWrite(category.id, async () => {
+    const { error } = await sb.from('budget_categories').delete().eq('id', category.id);
+    if (error) throw error;
+  });
+  renderBudgetPanel();
+  onBudgetChanged();
+  focusInPanel('.budget-add-category');
+}
 
 init();
