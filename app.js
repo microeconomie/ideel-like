@@ -1634,12 +1634,15 @@ async function loadBudget(force = false) {
 
 // Writes on the same row run one after the other (insert, then edits, then delete), so a slow
 // request can't land after a newer one. Field edits are debounced and merged per row.
+// waitFor lists other rows whose pending writes must land first (e.g. a new entry's category).
 const writeChains = new Map();
 const pendingSaves = new Map();
 
-function queueWrite(id, task) {
-  const previous = writeChains.get(id) || Promise.resolve();
-  const next = previous.catch(() => {}).then(task);
+function queueWrite(id, task, waitFor = []) {
+  const previous = Promise.all(
+    [id, ...waitFor].map((key) => (writeChains.get(key) || Promise.resolve()).catch(() => {}))
+  );
+  const next = previous.then(task);
   writeChains.set(id, next);
   return next.catch(onBudgetWriteError);
 }
@@ -1724,10 +1727,14 @@ function insertBudgetEntry(entry) {
     monthly_amount: entry.monthly_amount,
     position: entry.position,
   };
-  queueWrite(entry.id, async () => {
-    const { error } = await sb.from('budget_entries').insert(row);
-    if (error) throw error;
-  });
+  queueWrite(
+    entry.id,
+    async () => {
+      const { error } = await sb.from('budget_entries').insert(row);
+      if (error) throw error;
+    },
+    [entry.category_id]
+  );
 }
 
 function insertBudgetCategory(category) {
@@ -2128,11 +2135,15 @@ function deleteBudgetCategory(category) {
   dropPendingSave('budget_categories', category.id);
   budget.entries = budget.entries.filter((e) => e.category_id !== category.id);
   budget.categories = budget.categories.filter((c) => c.id !== category.id);
-  // its entries go with it (on delete cascade)
-  queueWrite(category.id, async () => {
-    const { error } = await sb.from('budget_categories').delete().eq('id', category.id);
-    if (error) throw error;
-  });
+  // its entries go with it (on delete cascade), once their own pending writes have landed
+  queueWrite(
+    category.id,
+    async () => {
+      const { error } = await sb.from('budget_categories').delete().eq('id', category.id);
+      if (error) throw error;
+    },
+    entries.map((e) => e.id)
+  );
   renderBudgetPanel();
   onBudgetChanged();
   focusInPanel('.budget-add-category');
